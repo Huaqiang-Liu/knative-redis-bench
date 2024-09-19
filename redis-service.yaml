@@ -1,0 +1,36 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: redis-benchmark
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        # autoscaling.knative.dev/targetUtilizationPercentage: "70" # 设置目标利用率
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "80"
+        autoscaling.knative.dev/target: "1"    # 设置每个 Pod 期望的并发数
+        # autoscaling.knative.dev/class: "kpa.autoscaling.knative.dev" # 使用KPA（Knative Pod Autoscaler）
+        # autoscaling.knative.dev/metric: "concurrency"  # 基于并发请求进行伸缩
+    spec:
+      containers:
+        - image: ericarthurblair/redis-benchmark@sha256:714108553fa59776b1263cff615894568b7f5767082e0928fb35634e673d909e
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: REDIS_HOST
+              value: "redis-master"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis
+                  key: redis-password
+          readinessProbe: null
+          volumeMounts:
+            - name: log-volume
+              mountPath: /var/log
+      volumes:
+        - name: log-volume
+          emptyDir: {}

@@ -1,0 +1,27 @@
+cluster:
+  enabled: true
+
+master:
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - redis
+          topologyKey: "kubernetes.io/hostname"
+
+replica:
+  replicaCount: 7
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - redis
+          topologyKey: "kubernetes.io/hostname"
