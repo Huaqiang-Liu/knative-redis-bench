@@ -7,7 +7,7 @@ spec:
   template:
     metadata:
       annotations:
-        containerConcurrency: "0"  # 指定容器最大并发请求数，默认0表示不限制
+        containerConcurrency: "1"  # 指定容器最大并发请求数，默认0表示不限制
         # autoscaling.knative.dev/targetUtilizationPercentage: "70" # 设置目标利用率
         autoscaling.knative.dev/minScale: "1"
         autoscaling.knative.dev/maxScale: "23"
