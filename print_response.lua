@@ -1,7 +1,7 @@
 -- 使用 os.execute 来实现延迟
 local lambda = 16.0  -- 期望值（每秒请求数）和方差
 
--- 生成指数分布的随机数
+-- 任务到达时间是泊松分布，故任务间隔时间服从指数分布
 local function poisson_delay()
    return -math.log(1.0 - math.random()) / lambda
 end

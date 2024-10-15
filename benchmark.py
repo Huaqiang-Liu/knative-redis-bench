@@ -41,8 +41,10 @@ def gen_task():
     unit_task(redis_host, redis_port, rate)
     end_time = time.time() * 1000
     
+    pod_name = os.getenv('HOSTNAME')
+    
     # 返回“任务大小 开始时间戳 结束时间戳 持续时间 JCT”
-    ret = f'{rate} {start_time} {end_time} {end_time - start_time} {end_time - request_route_timestamp}\n'
+    ret = f'{rate} {start_time} {end_time} {end_time - start_time} {end_time - request_route_timestamp} {pod_name}\n'
     
     # 将ret发送给activator，在终端里向activator发包的方式：curl -X POST http://172.18.0.10:30001/ -v
     # activator_url = 'http://172.18.0.3:30001/'
