@@ -22,6 +22,7 @@ import (
 	"context"
 	"math/rand"
 	"sync"
+	"time"
 )
 
 // lbPolicy is a functor that selects a target pod from the list, or (noop, nil) if
@@ -135,5 +136,46 @@ func newRoundRobinPolicy() lbPolicy {
 		}
 		// We exhausted all the options...
 		return noop, nil
+	}
+}
+
+// 固定等待时间的轮询策略。参数是最高等待时间，如果超过这个时间就不执行Reserve检查，直接作为target返回
+func fixedWaitRoundRobinPolicy(maxWait int) lbPolicy {
+	var (
+		mu  sync.Mutex
+		idx int
+	)
+	return func(ctx context.Context, targets []*podTracker) (func(), *podTracker) {
+		mu.Lock()
+		defer mu.Unlock()
+		// The number of trackers might have shrunk, so reset to 0.
+		l := len(targets)
+		if idx >= l {
+			idx = 0
+		}
+
+		// 设置定时器，超过maxWait毫秒就不执行Reserve检查，直接返回target
+		timer := time.NewTimer(time.Duration(maxWait) * time.Millisecond)
+		defer timer.Stop()
+
+		for {
+			select {
+			case <-timer.C:
+				// 超过最大等待时间，直接返回当前target
+				p := idx % l
+				idx = (idx + 1) % l
+				return noop, targets[p]
+			default:
+				for i := 0; i < l; i++ {
+					p := (idx + i) % l
+					if cb, ok := targets[p].Reserve(ctx); ok {
+						// We want to start with the next index.
+						idx = p + 1
+						return cb, targets[p]
+					}
+					// 运行到这里证明当前pod不空闲，检查是否超过了最大等待时间
+				}
+			}
+		}
 	}
 }

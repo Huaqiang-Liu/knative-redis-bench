@@ -88,6 +88,9 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	revID := RevIDFrom(r.Context())
+
+	// 取单位为毫秒的时间戳，作为请求到达activator的时间
+	arrive_timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
 	if err := a.throttler.Try(tryContext, revID, func(dest string) error {
 		trySpan.End()
 
@@ -95,7 +98,7 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if tracingEnabled {
 			proxyCtx, proxySpan = trace.StartSpan(r.Context(), "activator_proxy")
 		}
-		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb)
+		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb, arrive_timestamp)
 		proxySpan.End()
 
 		return nil
@@ -115,13 +118,14 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.ResponseWriter,
-	r *http.Request, target string, tracingEnabled bool, usePassthroughLb bool) {
+	r *http.Request, target string, tracingEnabled bool, usePassthroughLb bool, arrive_timestamp string) {
 	netheader.RewriteHostIn(r)
 	r.Header.Set(netheader.ProxyKey, activator.Name)
 
 	// 添加时间戳到请求头，精确到毫秒
 	timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
 	r.Header.Set("X-Request-Timestamp", timestamp)
+	r.Header.Set("X-Arrive-Timestamp", arrive_timestamp)
 
 	// Set up the reverse proxy.
 	hostOverride := pkghttp.NoHostOverride

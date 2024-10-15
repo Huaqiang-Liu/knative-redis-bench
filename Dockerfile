@@ -2,6 +2,7 @@ FROM python:3.8-slim
 
 RUN pip install redis
 RUN pip install flask
+RUN pip install requests
 
 # 复制应用程序代码
 COPY benchmark.py /app/benchmark.py

@@ -190,14 +190,17 @@ func newRevisionThrottler(revID types.NamespacedName,
 	// 	revBreaker = queue.NewBreaker(breakerParams)
 	// 	lbp = newRoundRobinPolicy()
 	// }
-
-	// 测试早期绑定策略：activator始终负责负载均衡，cc设为1，用轮询
-	revBreaker = queue.NewBreaker(breakerParams)
-	lbp = newRoundRobinPolicy()
-
-	// 测试延迟绑定策略：activator始终负责负载均衡，一直用firstAvailableLBPolicy
+	// 测试延迟绑定策略：activator始终负责负载均衡，cc设为1，用做了检查的轮询
 	// revBreaker = queue.NewBreaker(breakerParams)
-	// lbp = firstAvailableLBPolicy
+	// lbp = newRoundRobinPolicy()
+
+	// 测试早期绑定策略：activator始终负责负载均衡，用不做检查的纯轮询
+	// revBreaker = queue.NewBreaker(breakerParams)
+	// lbp = pureRoundRobinPolicy()
+
+	// 测试固定等待时间策略
+	revBreaker = queue.NewBreaker(breakerParams)
+	lbp = fixedWaitRoundRobinPolicy(1000)
 
 	return &revisionThrottler{
 		revID:                revID,

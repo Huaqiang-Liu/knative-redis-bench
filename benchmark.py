@@ -3,6 +3,7 @@ import redis
 import random
 import time
 from flask import Flask, request
+import requests
 
 app = Flask(__name__)
 
@@ -31,28 +32,37 @@ def gen_task():
     # job_len = [int(os.getenv('TASK_SIZE', 1))]
     # job_weight = [1]
     
-    request_route_timestamp = request.headers.get('X-Request-Timestamp')
-    if not request_route_timestamp:
+    route_time_str = request.headers.get('X-Request-Timestamp')
+    arrive_time_str = request.headers.get('X-Arrive-Timestamp')
+    if not route_time_str:
         return "No timestamp found in request headers."
-    request_route_timestamp = int(request_route_timestamp)
+    if not arrive_time_str:
+        return "No arrive timestamp found in request headers."
+    route_time = int(route_time_str)
+    arrive_time = int(arrive_time_str)
     
     rate = random.choices(job_len, job_weight)[0]
     start_time = time.time() * 1000
     unit_task(redis_host, redis_port, rate)
     end_time = time.time() * 1000
     
-    pod_name = os.getenv('HOSTNAME')
+    jct = end_time - route_time # 任务发往pod到执行结束
+    responsetime = start_time - arrive_time # 响应时间：任务到达activator到开始执行
+    latency = end_time - arrive_time # 总延迟：任务到达activator到执行结束
+    # pod_name = os.getenv('HOSTNAME')
     
-    # 返回“任务大小 开始时间戳 结束时间戳 持续时间 JCT”
-    ret = f'{rate} {start_time} {end_time} {end_time - start_time} {end_time - request_route_timestamp} {pod_name}\n'
+    # 返回“任务大小 responsetime JCT latency(任务到达activator到执行结束)”
+    ret = f'{rate} {responsetime} {jct} {latency}\n'
     
     # 将ret发送给activator，在终端里向activator发包的方式：curl -X POST http://172.18.0.10:30001/ -v
-    # activator_url = 'http://172.18.0.3:30001/'
-    # try:
-    #     response = requests.post(activator_url, data=ret)
-    #     response.raise_for_status()
-    # except requests.exceptions.RequestException as e:
-    #     print(f'Error sending data to activator: {e}')
+    node_of_activator = os.getenv('NODE_OF_ACTIVATOR')
+    activator_url = f'http://172.18.0.{node_of_activator}:30001/'
+    try:
+        headers = {'X-Arrive-Timestamp': arrive_time_str}
+        response = requests.post(activator_url, data=ret, headers=headers)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f'Error sending data to activator: {e}')
     return ret
 
 if __name__ == "__main__":
