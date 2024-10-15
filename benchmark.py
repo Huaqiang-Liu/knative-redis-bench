@@ -20,28 +20,21 @@ def unit_task(redis_host, redis_port, rate = 1):
 def gen_task():
     redis_host = os.getenv('REDIS_HOST', 'localhost')
     redis_port = int(os.getenv('REDIS_PORT', 6379))
-
-    job_len = [8000, 4000, 2000, 1000, 700, 500, 350, 250, 200, 150, 100, 50, 40, 30, 25, 15, 5, 3, 2, 1]
-    job_weight = [0.05] * 20
-    
-    # 若使用scalable.yaml部署任务，则有环境变量TASK_SIZE
-    # env:
-    #   - name: TASK_SIZE
-    #     value: "7000"
-    # 根据上面yaml中的配置提取任务长度
-    # job_len = [int(os.getenv('TASK_SIZE', 1))]
-    # job_weight = [1]
     
     route_time_str = request.headers.get('X-Request-Timestamp')
     arrive_time_str = request.headers.get('X-Arrive-Timestamp')
-    if not route_time_str:
-        return "No timestamp found in request headers."
-    if not arrive_time_str:
-        return "No arrive timestamp found in request headers."
+    rate_str = request.headers.get('X-Rate')
+    last_rate_str = request.headers.get('X-Last-Rate')
+    if not route_time_str or not arrive_time_str or not rate_str:
+        return "lack headers"
+    
+    rate = int(rate_str)
+    if last_rate_str == "":
+        last_rate_str = "0"
+    
     route_time = int(route_time_str)
     arrive_time = int(arrive_time_str)
     
-    rate = random.choices(job_len, job_weight)[0]
     start_time = time.time() * 1000
     unit_task(redis_host, redis_port, rate)
     end_time = time.time() * 1000
@@ -51,8 +44,8 @@ def gen_task():
     latency = end_time - arrive_time # 总延迟：任务到达activator到执行结束
     # pod_name = os.getenv('HOSTNAME')
     
-    # 返回“任务大小 responsetime JCT latency(任务到达activator到执行结束)”
-    ret = f'{rate} {responsetime} {jct} {latency}\n'
+    # 返回“任务大小 responsetime JCT latency(任务到达activator到执行结束) 上一次的任务大小（0表示没有或不符合要求）”
+    ret = f'{rate} {responsetime} {jct} {latency} {last_rate_str}\n'
     
     # 将ret发送给activator，在终端里向activator发包的方式：curl -X POST http://172.18.0.10:30001/ -v
     node_of_activator = os.getenv('NODE_OF_ACTIVATOR')

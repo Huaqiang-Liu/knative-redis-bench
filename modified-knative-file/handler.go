@@ -43,6 +43,8 @@ import (
 	"knative.dev/serving/pkg/networking"
 	"knative.dev/serving/pkg/queue"
 	"knative.dev/serving/pkg/reconciler/serverlessservice/resources/names"
+
+	"knative.dev/serving/pkg/shared"
 )
 
 // Throttler is the interface that Handler calls to Try to proxy the user request.
@@ -98,7 +100,24 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if tracingEnabled {
 			proxyCtx, proxySpan = trace.StartSpan(r.Context(), "activator_proxy")
 		}
-		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb, arrive_timestamp)
+
+		rate := shared.GenRate()
+		last_arrive_timestamp := shared.GetlastArriveTime()
+		last_rate := shared.GetLastRate()
+		if last_arrive_timestamp != "" && last_rate != "" { // 检查两次到达时间的差是否<=1000ms，以及这次的rate是否小于上次的rate，如果二者有一不满足，last_rate设为空
+			last_arrive_time, _ := strconv.ParseInt(last_arrive_timestamp, 10, 64)
+			arrive_time, _ := strconv.ParseInt(arrive_timestamp, 10, 64)
+			rate_int, _ := strconv.Atoi(rate)
+			last_rate_int, _ := strconv.Atoi(last_rate)
+			if arrive_time-last_arrive_time > 1 || rate_int >= last_rate_int {
+				last_rate = ""
+			}
+		}
+		shared.SetlastArriveTime(arrive_timestamp)
+		shared.SetLastRate(rate)
+
+		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb,
+			arrive_timestamp, rate, last_rate)
 		proxySpan.End()
 
 		return nil
@@ -117,8 +136,10 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// 执行完了负载均衡算法才会回调这个函数，将请求发给pod
 func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.ResponseWriter,
-	r *http.Request, target string, tracingEnabled bool, usePassthroughLb bool, arrive_timestamp string) {
+	r *http.Request, target string, tracingEnabled bool, usePassthroughLb bool,
+	arrive_timestamp string, rate string, last_rate string) {
 	netheader.RewriteHostIn(r)
 	r.Header.Set(netheader.ProxyKey, activator.Name)
 
@@ -126,6 +147,8 @@ func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.Resp
 	timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
 	r.Header.Set("X-Request-Timestamp", timestamp)
 	r.Header.Set("X-Arrive-Timestamp", arrive_timestamp)
+	r.Header.Set("X-Rate", rate)
+	r.Header.Set("X-Last-Rate", last_rate)
 
 	// Set up the reverse proxy.
 	hostOverride := pkghttp.NoHostOverride
