@@ -19,7 +19,7 @@ spec:
         - image: ericarthurblair/redis-benchmark@sha256:80616ea6c9106bbbd60f973640c8fd9b03273fb65700ae5d2e7c42d3a5c9c838
           env:
             - name: NODE_OF_ACTIVATOR
-              value: "10"
+              value: "4"
             - name: REDIS_HOST
               value: "redis-master"
             - name: REDIS_PORT
