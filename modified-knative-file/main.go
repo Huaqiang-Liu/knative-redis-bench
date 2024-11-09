@@ -21,6 +21,8 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 
 	"log"
 	"net/http"
@@ -208,28 +210,28 @@ func main() {
 	go activator.ReportStats(logger, statSink, statCh)
 
 	// 启动HTTP接收端，异步接收并记录外部HTTP请求
-	// go func() {
-	// 	http.HandleFunc("/store", func(w http.ResponseWriter, r *http.Request) {
-	// 		body, err := io.ReadAll(r.Body)
-	// 		if err != nil {
-	// 			http.Error(w, "Failed to read request body", http.StatusInternalServerError)
-	// 			return
-	// 		}
-	// 		defer r.Body.Close()
+	go func() {
+		http.HandleFunc("/store", func(w http.ResponseWriter, r *http.Request) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+				return
+			}
+			defer r.Body.Close()
 
-	// 		// string(body)是一行用空格分开的若干个数，第一个数是rate（int32）
-	// 		rate, _ := strconv.Atoi(strings.Split(string(body), " ")[0])
-	// 		// podname := r.Header.Get("Pod-Name")
-	// 		// shared.DelReqFromRS(podname, rate)
-	// 		print(rate)
-	// 		w.WriteHeader(http.StatusOK)
-	// 		// w.Write([]byte("Request stored"))
-	// 	})
+			// string(body)是一行用空格分开的若干个数，第一个数是rate（int32）
+			rate, _ := strconv.Atoi(strings.Split(string(body), " ")[0])
+			podip := r.Header.Get("X-PodIP")
+			shared.DelReqFromRS(podip, rate)
+			fmt.Println("将请求从RS中删除", podip, rate)
+			w.WriteHeader(http.StatusOK)
+			// w.Write([]byte("Request stored"))
+		})
 
-	// 	if err := http.ListenAndServe(":8081", nil); err != nil {
-	// 		log.Fatalf("Failed to start HTTP server: %v", err)
-	// 	}
-	// }()
+		if err := http.ListenAndServe(":8081", nil); err != nil {
+			log.Fatalf("Failed to start HTTP server: %v", err)
+		}
+	}()
 
 	// 处理队列中的请求，调换顺序等等
 	go shared.ManageQueue()

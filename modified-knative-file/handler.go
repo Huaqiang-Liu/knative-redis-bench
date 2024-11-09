@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
@@ -169,6 +170,11 @@ func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.Resp
 	r.Header.Set("X-Request-Timestamp", timestamp)
 	r.Header.Set("X-Arrive-Timestamp", arrive_timestamp)
 	r.Header.Set("X-Last-Rate", last_rate)
+
+	// 调度成功，将目标pod的ip和当前任务的rate加入到requestStatic中
+	rate, _ := strconv.Atoi(r.Header.Get("X-Rate"))
+	shared.AddReqToRS(target, rate)
+	fmt.Println("请求调度成功", target, rate)
 
 	// Set up the reverse proxy.
 	hostOverride := pkghttp.NoHostOverride

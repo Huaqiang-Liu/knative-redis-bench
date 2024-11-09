@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: activator-nodeport
+  namespace: knative-serving
+spec:
+  selector:
+    app: activator  # 确保和Activator Pod的标签匹配
+  type: NodePort
+  ports:
+    - protocol: TCP
+      port: 8081        # Service监听的端口
+      targetPort: 8081  # Pod的容器监听端口
+      nodePort: 30001   # 映射到节点的端口号，可以自定义

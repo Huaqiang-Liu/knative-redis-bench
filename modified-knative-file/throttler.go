@@ -18,6 +18,7 @@ package net
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"sync"
@@ -238,10 +239,13 @@ func (rt *revisionThrottler) acquireDest(ctx context.Context) (func(), *podTrack
 	switch policyName {
 	case "simpleRandomChoice2Policy":
 		policy = simpleRandomChoice2Policy()
+		fmt.Println("使用简单随机选择策略")
 	case "unfixedWaitRandomChoice2Policy":
 		policy = unfixedWaitRandomChoice2Policy()
+		fmt.Println("使用简单抢占策略")
 	default:
 		policy = unfixedWaitRandomChoice2Policy()
+		fmt.Println("没有指定策略")
 	}
 
 	return policy(ctx, rt.assignedTrackers)

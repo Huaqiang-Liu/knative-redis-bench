@@ -3,7 +3,6 @@ package shared
 import (
 	"net/http"
 	"strconv"
-	"unsafe"
 )
 
 type SchedulingUnit struct {
@@ -21,17 +20,6 @@ func (u *SchedulingUnit) GetRate() int {
 	ratestr := u.Req.Header.Get("X-Rate")
 	rate, _ := strconv.Atoi(ratestr)
 	return rate
-}
-
-// 将指针地址转换为指向特定位置的 byte 指针
-func BytePtrAt(ptr unsafe.Pointer, offset uintptr) *byte {
-	return (*byte)(unsafe.Pointer(uintptr(ptr) + offset))
-}
-
-// 将指定偏移量处的字节设置为指定值
-func SetByteAt(ptr unsafe.Pointer, offset uintptr, value byte) {
-	bytePtr := BytePtrAt(ptr, offset)
-	*bytePtr = value
 }
 
 func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan struct{}) {

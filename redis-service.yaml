@@ -16,7 +16,7 @@ spec:
         # autoscaling.knative.dev/metric: "concurrency"  # 基于并发请求进行伸缩
     spec:
       containers:
-        - image: ericarthurblair/redis-benchmark@sha256:2218250b0252c930dd54c36133c05de5d07c61e133fc1cfdd7635b2b77412198
+        - image: ericarthurblair/redis-benchmark@sha256:83d8ad5acdefc7517e209f55de165eb8672520883202ff8a0b65412e14f11dde
           resources:
             limits: # 最大资源
               cpu: "1"
@@ -24,7 +24,7 @@ spec:
               cpu: "1"
           env:
             - name: NODE_OF_ACTIVATOR
-              value: "8"
+              value: "4"
             - name: REDIS_HOST
               value: "redis-master"
             - name: REDIS_PORT

@@ -20,6 +20,7 @@ package net
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync"
 	"time"
@@ -183,7 +184,7 @@ func fixedWaitRoundRobinPolicy(maxWait int) lbPolicy {
 	}
 }
 
-// 不开计时器，直接随机从targets中选两个，当前先决定为这俩中的第一个为目标pod
+// 不开计时器，直接随机从targets中选两个，将当前负载轻的作为target
 func simpleRandomChoice2Policy() lbPolicy {
 	var (
 		mu sync.Mutex
@@ -208,7 +209,12 @@ func simpleRandomChoice2Policy() lbPolicy {
 		if cb, ok := pick2.Reserve(ctx); ok {
 			return cb, pick2
 		}
-		return noop, pick1
+		// 两个pod都不空闲，直接返回负载较轻的pod
+		if pick1.dest == shared.ChoosePodByRate(pick1.dest, pick2.dest) {
+			return noop, pick1
+		} else {
+			return noop, pick2
+		}
 	}
 }
 
@@ -233,6 +239,8 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 		}
 		pick1, pick2 := targets[r1], targets[r2]
 
+		fmt.Println("现在有两个pod可以选择，分别是：", pick1.dest, pick2.dest)
+
 		startTime := time.Now()
 		timer := time.NewTimer(time.Duration(shared.MaxWaitingTime) * time.Millisecond)
 		defer timer.Stop()
@@ -252,6 +260,7 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 			remainingTime := time.Duration(shared.MaxWaitingTime)*time.Millisecond - elapsed
 			// 检查activatorQueue队列是否有元素
 			if len(shared.ActivatorQueue) > 0 && remainingTime > shared.TmpTaskTime {
+				fmt.Println("现在有一个可以抢占的任务在队头，队列的长度为：", len(shared.ActivatorQueue))
 				// TODO: 以后这个TmpTaskTime要改成该任务rate对应的执行时间
 				// 暂停计时器，处理队首任务
 				timer.Stop()
@@ -265,10 +274,14 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 				}
 				// 重启计时器
 				timer.Reset(remainingTime)
-				continue
 			}
-			// 等待一小段时间后重试
-			time.Sleep(10 * time.Millisecond)
+			if remainingTime <= 0 { // 超过最大等待时间，直接返回二者之中负载较轻的pod
+				if pick1.dest == shared.ChoosePodByRate(pick1.dest, pick2.dest) {
+					return noop, pick1
+				} else {
+					return noop, pick2
+				}
+			}
 		}
 	}
 }

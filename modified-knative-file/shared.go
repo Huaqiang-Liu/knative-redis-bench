@@ -19,7 +19,7 @@ type PodInfo struct {
 
 type RequestStatic struct {
 	sync.RWMutex
-	Data map[string]PodInfo // key是pod的HOSTNAME，value是PodInfo
+	Data map[string]PodInfo // key是pod的ip，value是PodInfo
 }
 
 var requestStatic = &RequestStatic{
@@ -35,11 +35,11 @@ func GetRequestStatic() *map[string]PodInfo {
 }
 
 // 当一个任务调度成功时，更新requestStatic：将该任务的rate加入到对应pod的rates中（RS指的是Request Static）
-func AddReqToRS(podname string, rate int) {
+func AddReqToRS(podip string, rate int) {
 	requestStatic.Lock()
 	defer requestStatic.Unlock()
-	if _, ok := requestStatic.Data[podname]; !ok {
-		requestStatic.Data[podname] = PodInfo{
+	if _, ok := requestStatic.Data[podip]; !ok {
+		requestStatic.Data[podip] = PodInfo{
 			reqs:    [20]int{}, // 数组的元素默认值就是0
 			ratesum: 0,
 		}
@@ -55,17 +55,17 @@ func AddReqToRS(podname string, rate int) {
 	if index == -1 {
 		return
 	}
-	podInfo := requestStatic.Data[podname]
+	podInfo := requestStatic.Data[podip]
 	podInfo.reqs[index]++
 	podInfo.ratesum += rate
-	requestStatic.Data[podname] = podInfo
+	requestStatic.Data[podip] = podInfo
 }
 
 // 当一个任务执行完返回报文到activator时，更新requestStatic：减一次该pod上这个rate相应的请求数，以及ratesum
-func DelReqFromRS(podname string, rate int) {
+func DelReqFromRS(podip string, rate int) {
 	requestStatic.Lock()
 	defer requestStatic.Unlock()
-	if _, ok := requestStatic.Data[podname]; !ok {
+	if _, ok := requestStatic.Data[podip]; !ok {
 		return // 按理说这不可能发生——难道能虚空执行一个任务吗？
 	}
 	index := -1
@@ -78,12 +78,25 @@ func DelReqFromRS(podname string, rate int) {
 	if index == -1 {
 		return
 	}
-	podInfo := requestStatic.Data[podname]
+	podInfo := requestStatic.Data[podip]
 	if podInfo.reqs[index] > 0 {
 		podInfo.reqs[index]--
 		podInfo.ratesum -= rate
 	}
-	requestStatic.Data[podname] = podInfo
+	requestStatic.Data[podip] = podInfo
+}
+
+// 选择两个pod，根据rate选择其中一个
+func ChoosePodByRate(podip1 string, podip2 string) string {
+	podInfo1 := requestStatic.Data[podip1]
+	podInfo2 := requestStatic.Data[podip2]
+	if podInfo1.ratesum > podInfo2.ratesum {
+		return podip2
+	} else if podInfo1.ratesum < podInfo2.ratesum {
+		return podip1
+	} else {
+		return podip1
+	}
 }
 
 // 全局变量，记录上一次的rate和到达时间戳（字符串，默认为空）
