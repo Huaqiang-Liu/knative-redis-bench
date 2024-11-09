@@ -48,14 +48,15 @@ def gen_task():
     ret = f'{rate} {responsetime} {jct} {latency} {last_rate_str}\n'
     
     # 将ret发送给activator，在终端里向activator发包的方式：curl -X POST http://172.18.0.10:30001/ -v
-    node_of_activator = os.getenv('NODE_OF_ACTIVATOR')
-    activator_url = f'http://172.18.0.{node_of_activator}:30001/'
-    try:
-        headers = {'X-Arrive-Timestamp': arrive_time_str}
-        response = requests.post(activator_url, data=ret, headers=headers)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        print(f'Error sending data to activator: {e}')
+    # node_of_activator = os.getenv('NODE_OF_ACTIVATOR')
+    # activator_url = f'http://172.18.0.{node_of_activator}:30001/'
+    # try:
+    #     # headers = {'X-Arrive-Timestamp': arrive_time_str}
+    #     headers = {'Pod-Name': os.getenv('HOSTNAME')}
+    #     response = requests.post(activator_url, data=ret, headers=headers)
+    #     response.raise_for_status()
+    # except requests.exceptions.RequestException as e:
+    #     print(f'Error sending data to activator: {e}')
     return ret
 
 if __name__ == "__main__":

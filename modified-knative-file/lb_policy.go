@@ -23,6 +23,8 @@ import (
 	"math/rand"
 	"sync"
 	"time"
+
+	"knative.dev/serving/pkg/shared"
 )
 
 // lbPolicy is a functor that selects a target pod from the list, or (noop, nil) if
@@ -110,6 +112,7 @@ func pureRoundRobinPolicy() lbPolicy {
 	}
 }
 
+// 延迟绑定，每次都要做Reserve检查
 func newRoundRobinPolicy() lbPolicy {
 	var (
 		mu  sync.Mutex
@@ -176,6 +179,96 @@ func fixedWaitRoundRobinPolicy(maxWait int) lbPolicy {
 					// 运行到这里证明当前pod不空闲，检查是否超过了最大等待时间
 				}
 			}
+		}
+	}
+}
+
+// 不开计时器，直接随机从targets中选两个，当前先决定为这俩中的第一个为目标pod
+func simpleRandomChoice2Policy() lbPolicy {
+	var (
+		mu sync.Mutex
+	)
+	return func(ctx context.Context, targets []*podTracker) (func(), *podTracker) {
+		mu.Lock()
+		defer mu.Unlock()
+		l := len(targets)
+		if l == 1 {
+			pick := targets[0]
+			return noop, pick
+		}
+		r1, r2 := rand.Intn(l), rand.Intn(l-1)
+		if r2 >= r1 {
+			r2++
+		}
+		pick1, pick2 := targets[r1], targets[r2]
+
+		if cb, ok := pick1.Reserve(ctx); ok {
+			return cb, pick1
+		}
+		if cb, ok := pick2.Reserve(ctx); ok {
+			return cb, pick2
+		}
+		return noop, pick1
+	}
+}
+
+// 支持简单抢占的power of two
+func unfixedWaitRandomChoice2Policy() lbPolicy {
+	var (
+		mu sync.Mutex
+	)
+	return func(ctx context.Context, targets []*podTracker) (func(), *podTracker) {
+		mu.Lock()
+		defer mu.Unlock()
+		l := len(targets)
+		if l == 1 {
+			// 只有一个pod，直接选择它，不管它是否空闲
+			pick := targets[0]
+			return noop, pick
+		}
+		// 随机选择两个pod
+		r1, r2 := rand.Intn(l), rand.Intn(l-1)
+		if r2 >= r1 {
+			r2++
+		}
+		pick1, pick2 := targets[r1], targets[r2]
+
+		startTime := time.Now()
+		timer := time.NewTimer(time.Duration(shared.MaxWaitingTime) * time.Millisecond)
+		defer timer.Stop()
+
+		for {
+			// 尝试预订其中一个pod
+			if cb, ok := pick1.Reserve(ctx); ok {
+				return cb, pick1
+			}
+			if cb, ok := pick2.Reserve(ctx); ok {
+				return cb, pick2
+			}
+			elapsed := time.Since(startTime)
+			if elapsed >= time.Duration(shared.MaxWaitingTime)*time.Millisecond { // Duration默认单位是纳秒
+				return noop, pick1 // TODO: 后面改成选择负载较轻的pod
+			}
+			remainingTime := time.Duration(shared.MaxWaitingTime)*time.Millisecond - elapsed
+			// 检查activatorQueue队列是否有元素
+			if len(shared.ActivatorQueue) > 0 && remainingTime > shared.TmpTaskTime {
+				// TODO: 以后这个TmpTaskTime要改成该任务rate对应的执行时间
+				// 暂停计时器，处理队首任务
+				timer.Stop()
+				select {
+				case u := <-shared.ActivatorQueue:
+					u.Req.Header.Set("X-LbPolicy", "simpleRandomChoice2Policy")
+					u.Handler.ServeHTTP(u.Writer, u.Req)
+					close(u.Done)
+				default:
+					// 无任务需要处理
+				}
+				// 重启计时器
+				timer.Reset(remainingTime)
+				continue
+			}
+			// 等待一小段时间后重试
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }

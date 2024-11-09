@@ -39,6 +39,7 @@ import (
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/logging/logkey"
 	"knative.dev/pkg/reconciler"
+	activatorhandler "knative.dev/serving/pkg/activator/handler"
 	"knative.dev/serving/pkg/apis/serving"
 	v1 "knative.dev/serving/pkg/apis/serving/v1"
 	revisioninformer "knative.dev/serving/pkg/client/injection/informers/serving/v1/revision"
@@ -199,8 +200,12 @@ func newRevisionThrottler(revID types.NamespacedName,
 	// lbp = pureRoundRobinPolicy()
 
 	// 测试固定等待时间策略
+	// revBreaker = queue.NewBreaker(breakerParams)
+	// lbp = fixedWaitRoundRobinPolicy(shared.MaxWaitingTime)
+
+	// 测试简单抢占策略
 	revBreaker = queue.NewBreaker(breakerParams)
-	lbp = fixedWaitRoundRobinPolicy(1000)
+	lbp = unfixedWaitRandomChoice2Policy()
 
 	return &revisionThrottler{
 		revID:                revID,
@@ -224,7 +229,23 @@ func (rt *revisionThrottler) acquireDest(ctx context.Context) (func(), *podTrack
 	if rt.clusterIPTracker != nil {
 		return noop, rt.clusterIPTracker
 	}
-	return rt.lbPolicy(ctx, rt.assignedTrackers)
+
+	// 从context中检索lbPolicy
+	policyName := activatorhandler.GetLbPolicy(ctx)
+
+	// 根据lbPolicy选择相应的负载均衡策略
+	var policy lbPolicy
+	switch policyName {
+	case "simpleRandomChoice2Policy":
+		policy = simpleRandomChoice2Policy()
+	case "unfixedWaitRandomChoice2Policy":
+		policy = unfixedWaitRandomChoice2Policy()
+	default:
+		policy = unfixedWaitRandomChoice2Policy()
+	}
+
+	return policy(ctx, rt.assignedTrackers)
+	// return rt.lbPolicy(ctx, rt.assignedTrackers)
 }
 
 func (rt *revisionThrottler) try(ctx context.Context, function func(string) error) error {

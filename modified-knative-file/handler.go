@@ -80,6 +80,20 @@ func New(_ context.Context, t Throttler, transport http.RoundTripper, usePassthr
 	}
 }
 
+// 定义用于在 context 中存储和检索 lbPolicy 的键
+type lbPolicyKey struct{}
+
+// 将lbPolicy存储到context中
+func WithLBPolicy(ctx context.Context, lbPolicy string) context.Context {
+	return context.WithValue(ctx, lbPolicyKey{}, lbPolicy)
+}
+
+// 检索context中存储的lbPolicy
+func GetLbPolicy(ctx context.Context) string {
+	lbPolicy, _ := ctx.Value(lbPolicyKey{}).(string)
+	return lbPolicy
+}
+
 func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	config := activatorconfig.FromContext(r.Context())
 	tracingEnabled := config.Tracing.Backend != tracingconfig.None
@@ -91,9 +105,13 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	revID := RevIDFrom(r.Context())
 
+	// 从请求头中提取lbPolicy，并存储到context中，默认为unfixedWaitRandomChoice2Policy
+	lbPolicy := r.Header.Get("X-LbPolicy")
+	ctx_with_lbpolicy := WithLBPolicy(tryContext, lbPolicy)
+
 	// 取单位为毫秒的时间戳，作为请求到达activator的时间
 	arrive_timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
-	if err := a.throttler.Try(tryContext, revID, func(dest string) error {
+	if err := a.throttler.Try(ctx_with_lbpolicy, revID, func(dest string) error {
 		trySpan.End()
 
 		proxyCtx, proxySpan := r.Context(), (*trace.Span)(nil)
@@ -101,7 +119,7 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			proxyCtx, proxySpan = trace.StartSpan(r.Context(), "activator_proxy")
 		}
 
-		rate := shared.GenRate()
+		rate := r.Header.Get("X-Rate")
 		last_arrive_timestamp := shared.GetlastArriveTime()
 		last_rate := shared.GetLastRate()
 		if last_arrive_timestamp != "" && last_rate != "" { // 检查两次到达时间的差是否<=1000ms，以及这次的rate是否小于上次的rate，如果二者有一不满足，last_rate设为空
@@ -109,15 +127,17 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			arrive_time, _ := strconv.ParseInt(arrive_timestamp, 10, 64)
 			rate_int, _ := strconv.Atoi(rate)
 			last_rate_int, _ := strconv.Atoi(last_rate)
-			if arrive_time-last_arrive_time > 1 || rate_int >= last_rate_int {
+			if arrive_time-last_arrive_time > int64(shared.MaxWaitingTime) || rate_int >= last_rate_int {
 				last_rate = ""
 			}
+
 		}
 		shared.SetlastArriveTime(arrive_timestamp)
 		shared.SetLastRate(rate)
 
 		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb,
-			arrive_timestamp, rate, last_rate)
+			arrive_timestamp, // rate,
+			last_rate)
 		proxySpan.End()
 
 		return nil
@@ -139,7 +159,8 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // 执行完了负载均衡算法才会回调这个函数，将请求发给pod
 func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.ResponseWriter,
 	r *http.Request, target string, tracingEnabled bool, usePassthroughLb bool,
-	arrive_timestamp string, rate string, last_rate string) {
+	arrive_timestamp string, // rate string,
+	last_rate string) {
 	netheader.RewriteHostIn(r)
 	r.Header.Set(netheader.ProxyKey, activator.Name)
 
@@ -147,7 +168,6 @@ func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.Resp
 	timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
 	r.Header.Set("X-Request-Timestamp", timestamp)
 	r.Header.Set("X-Arrive-Timestamp", arrive_timestamp)
-	r.Header.Set("X-Rate", rate)
 	r.Header.Set("X-Last-Rate", last_rate)
 
 	// Set up the reverse proxy.
@@ -193,6 +213,16 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 				logger.Errorw("Unable to enable full duplex", zap.Error(err))
 			}
 		}
-		h.ServeHTTP(w, r)
+		// 产生rate并记录进r的请求头
+		rate := shared.GenRate()
+		r.Header.Set("X-Rate", rate)
+		// 设置“X-LbPolicy”为“unfixedWaitRandomChoice2Policy”，表示当前是正经从队头取出的元素，而不是抢占后不等待的任务（决定使用算法的不同）
+		r.Header.Set("X-LbPolicy", "unfixedWaitRandomChoice2Policy")
+		// 创建一个用于同步的通道
+		done := make(chan struct{})
+		// 将请求加入队列，传递同步通道
+		shared.AddReq(h, w, r, done)
+		// 等待请求处理完成
+		<-done
 	})
 }

@@ -10,16 +10,21 @@ spec:
         containerConcurrency: "1"  # 指定容器最大并发请求数，默认0表示不限制
         # autoscaling.knative.dev/targetUtilizationPercentage: "70" # 设置目标利用率
         autoscaling.knative.dev/minScale: "1"
-        autoscaling.knative.dev/maxScale: "23"
+        autoscaling.knative.dev/maxScale: "128"
         autoscaling.knative.dev/target: "1"    # 设置每个 Pod 期望的并发数
         # autoscaling.knative.dev/class: "kpa.autoscaling.knative.dev" # 使用KPA（Knative Pod Autoscaler）
         # autoscaling.knative.dev/metric: "concurrency"  # 基于并发请求进行伸缩
     spec:
       containers:
-        - image: ericarthurblair/redis-benchmark@sha256:80616ea6c9106bbbd60f973640c8fd9b03273fb65700ae5d2e7c42d3a5c9c838
+        - image: ericarthurblair/redis-benchmark@sha256:2218250b0252c930dd54c36133c05de5d07c61e133fc1cfdd7635b2b77412198
+          resources:
+            limits: # 最大资源
+              cpu: "1"
+            requests: # 申请资源
+              cpu: "1"
           env:
             - name: NODE_OF_ACTIVATOR
-              value: "4"
+              value: "8"
             - name: REDIS_HOST
               value: "redis-master"
             - name: REDIS_PORT

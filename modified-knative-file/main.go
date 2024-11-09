@@ -21,7 +21,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 
 	"log"
 	"net/http"
@@ -208,32 +207,32 @@ func main() {
 	defer statSink.Shutdown()
 	go activator.ReportStats(logger, statSink, statCh)
 
-	// 启动HTTP接收端，异步接收并记录外部HTTP请求（go func创建goroutine，理解为协程）
-	go func() {
-		http.HandleFunc("/store", func(w http.ResponseWriter, r *http.Request) {
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, "Failed to read request body", http.StatusInternalServerError)
-				return
-			}
-			defer r.Body.Close()
+	// 启动HTTP接收端，异步接收并记录外部HTTP请求
+	// go func() {
+	// 	http.HandleFunc("/store", func(w http.ResponseWriter, r *http.Request) {
+	// 		body, err := io.ReadAll(r.Body)
+	// 		if err != nil {
+	// 			http.Error(w, "Failed to read request body", http.StatusInternalServerError)
+	// 			return
+	// 		}
+	// 		defer r.Body.Close()
 
-			// 存储到全局数据结构
-			arrivetime := r.Header.Get("X-Arrive-Timestamp")
-			if arrivetime == "" {
-				arrivetime = fmt.Sprintf("req-%d", time.Now().UnixNano())
-			}
+	// 		// string(body)是一行用空格分开的若干个数，第一个数是rate（int32）
+	// 		rate, _ := strconv.Atoi(strings.Split(string(body), " ")[0])
+	// 		// podname := r.Header.Get("Pod-Name")
+	// 		// shared.DelReqFromRS(podname, rate)
+	// 		print(rate)
+	// 		w.WriteHeader(http.StatusOK)
+	// 		// w.Write([]byte("Request stored"))
+	// 	})
 
-			shared.SetRequestStatic(arrivetime, string(body))
+	// 	if err := http.ListenAndServe(":8081", nil); err != nil {
+	// 		log.Fatalf("Failed to start HTTP server: %v", err)
+	// 	}
+	// }()
 
-			w.WriteHeader(http.StatusOK)
-			// w.Write([]byte("Request stored"))
-		})
-
-		if err := http.ListenAndServe(":8081", nil); err != nil {
-			log.Fatalf("Failed to start HTTP server: %v", err)
-		}
-	}()
+	// 处理队列中的请求，调换顺序等等
+	go shared.ManageQueue()
 
 	// Create and run our concurrency reporter
 	concurrencyReporter := activatorhandler.NewConcurrencyReporter(ctx, env.PodName, statCh)
