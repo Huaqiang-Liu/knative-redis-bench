@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 type SchedulingUnit struct {
@@ -26,8 +27,6 @@ func (u *SchedulingUnit) GetRate() int {
 }
 
 func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan struct{}) {
-	// 创建用于通知调度完成的通道
-
 	u := SchedulingUnit{Handler: h, Writer: w, Req: r, Done: done}
 	ActivatorQueue <- u // 将请求加入队列
 }
@@ -56,7 +55,20 @@ func ManageQueue() {
 		}(u)
 
 		// 等待调度完成，立即处理下一个请求
-		<-schedulingDone
-		fmt.Println("_______当前任务调度完毕，准备处理下一个请求_______")
+		select {
+		case <-schedulingDone:
+			fmt.Println("_______当前任务调度完毕，准备处理下一个请求_______")
+		case <-time.After(5 * time.Second):
+			fmt.Println("_______调度阻塞超过5秒，放弃当前任务_______")
+			// ClearActivatorQueue()
+			close(schedulingDone)
+		}
+	}
+}
+
+// 添加清空 ActivatorQueue 的函数
+func ClearActivatorQueue() {
+	for len(ActivatorQueue) > 0 {
+		<-ActivatorQueue
 	}
 }

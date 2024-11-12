@@ -25,7 +25,7 @@ spec:
               cpu: "1"
           env:
             - name: NODE_OF_ACTIVATOR
-              value: "8"
+              value: "3"
             - name: REDIS_HOST
               value: "redis-master"
             - name: REDIS_PORT

@@ -155,10 +155,9 @@ func SetlastArriveTime(time string) {
 
 // 摇随机数决定rate
 func GenRate() string {
-
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	// index := rng.Intn(20)
-	index := rng.Intn(10)
-	index += 10
+	index := rng.Intn(20)
+	// index := rng.Intn(10)
+	// index += 10
 	return strconv.Itoa(Joblen[index])
 }

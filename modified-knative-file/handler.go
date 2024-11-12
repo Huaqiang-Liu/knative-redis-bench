@@ -269,6 +269,13 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 		// 将请求加入队列，传递同步通道
 		shared.AddReq(h, w, r, done)
 		// 等待请求处理完成
-		<-done
+		select {
+		case <-done:
+			fmt.Println("###rate为", rate, "的任务已经执行完成并返回到http.HandlerFunc")
+		case <-time.After(60 * time.Second):
+			fmt.Println("###rate为", rate, "的任务整体超时，终止当前handler并清空ActivatorQueue")
+			shared.ClearActivatorQueue()
+			close(done)
+		}
 	})
 }
