@@ -22,6 +22,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -203,14 +204,9 @@ func simpleRandomChoice2Policy() lbPolicy {
 		}
 		pick1, pick2 := targets[r1], targets[r2]
 
-		if cb, ok := pick1.Reserve(ctx); ok {
-			return cb, pick1
-		}
-		if cb, ok := pick2.Reserve(ctx); ok {
-			return cb, pick2
-		}
 		// 两个pod都不空闲，直接返回负载较轻的pod
-		if pick1.dest == shared.ChoosePodByRate(pick1.dest, pick2.dest) {
+		pick1ip, pick2ip := strings.Split(pick1.dest, ":")[0], strings.Split(pick2.dest, ":")[0]
+		if pick1ip == shared.ChoosePodByRate(pick1ip, pick2ip) {
 			return noop, pick1
 		} else {
 			return noop, pick2
@@ -238,6 +234,7 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 			r2++
 		}
 		pick1, pick2 := targets[r1], targets[r2]
+		pick1ip, pick2ip := strings.Split(pick1.dest, ":")[0], strings.Split(pick2.dest, ":")[0]
 
 		fmt.Println("现在有两个pod可以选择，分别是：", pick1.dest, pick2.dest)
 
@@ -246,19 +243,22 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 		defer timer.Stop()
 
 		for {
-			// 尝试预订其中一个pod
-			if cb, ok := pick1.Reserve(ctx); ok {
-				return cb, pick1
+			// 先看随机选出的pod有没有空闲的
+			idle := shared.ChooseIdlePod(pick1ip, pick2ip)
+			if pick1ip == idle {
+				return noop, pick1
+			} else if pick2ip == idle {
+				return noop, pick2
 			}
-			if cb, ok := pick2.Reserve(ctx); ok {
-				return cb, pick2
-			}
+
+			// 两个pod都有任务正在运行
 			elapsed := time.Since(startTime)
 			if elapsed >= time.Duration(shared.MaxWaitingTime)*time.Millisecond { // Duration默认单位是纳秒
 				return noop, pick1 // TODO: 后面改成选择负载较轻的pod
 			}
 			remainingTime := time.Duration(shared.MaxWaitingTime)*time.Millisecond - elapsed
-			// 检查activatorQueue队列是否有元素
+
+			// 检查activatorQueue队头是否有元素，以及适不适合抢占
 			if len(shared.ActivatorQueue) > 0 && remainingTime > shared.TmpTaskTime {
 				fmt.Println("现在有一个可以抢占的任务在队头，队列的长度为：", len(shared.ActivatorQueue))
 				// TODO: 以后这个TmpTaskTime要改成该任务rate对应的执行时间
@@ -275,7 +275,10 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 				// 重启计时器
 				timer.Reset(remainingTime)
 			}
-			if remainingTime <= 0 { // 超过最大等待时间，直接返回二者之中负载较轻的pod
+			// fmt.Println("没有抢占，", remainingTime.Milliseconds(), len(shared.ActivatorQueue))
+
+			// 超过最大等待时间，直接返回二者之中负载较轻的pod
+			if remainingTime <= 0 {
 				if pick1.dest == shared.ChoosePodByRate(pick1.dest, pick2.dest) {
 					return noop, pick1
 				} else {

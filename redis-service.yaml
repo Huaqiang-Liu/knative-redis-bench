@@ -17,6 +17,7 @@ spec:
     spec:
       containers:
         - image: ericarthurblair/redis-benchmark@sha256:83d8ad5acdefc7517e209f55de165eb8672520883202ff8a0b65412e14f11dde
+          imagePullPolicy: IfNotPresent
           resources:
             limits: # 最大资源
               cpu: "1"
@@ -24,7 +25,7 @@ spec:
               cpu: "1"
           env:
             - name: NODE_OF_ACTIVATOR
-              value: "4"
+              value: "8"
             - name: REDIS_HOST
               value: "redis-master"
             - name: REDIS_PORT

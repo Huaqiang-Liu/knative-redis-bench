@@ -4,6 +4,7 @@
 package shared
 
 import (
+	"fmt"
 	"math/rand"
 	"strconv"
 	"sync"
@@ -28,10 +29,17 @@ var requestStatic = &RequestStatic{
 
 var MaxWaitingTime = 500
 
-func GetRequestStatic() *map[string]PodInfo {
+func PrintRequestStatic() {
 	requestStatic.RLock()
 	defer requestStatic.RUnlock()
-	return &requestStatic.Data
+	fmt.Println("当前哪些pod上有哪些任务正在执行：")
+	for k, v := range requestStatic.Data {
+		for i, req := range v.reqs {
+			if req > 0 {
+				fmt.Println(k, "rate:", Joblen[i], "reqs:", req)
+			}
+		}
+	}
 }
 
 // 当一个任务调度成功时，更新requestStatic：将该任务的rate加入到对应pod的rates中（RS指的是Request Static）
@@ -90,12 +98,25 @@ func DelReqFromRS(podip string, rate int) {
 func ChoosePodByRate(podip1 string, podip2 string) string {
 	podInfo1 := requestStatic.Data[podip1]
 	podInfo2 := requestStatic.Data[podip2]
+	fmt.Println("两个pod上的总rate数分别为：", podInfo1.ratesum, podInfo2.ratesum)
 	if podInfo1.ratesum > podInfo2.ratesum {
 		return podip2
-	} else if podInfo1.ratesum < podInfo2.ratesum {
-		return podip1
 	} else {
 		return podip1
+	}
+}
+
+func ChooseIdlePod(podip1 string, podip2 string) string {
+	podInfo1 := requestStatic.Data[podip1]
+	podInfo2 := requestStatic.Data[podip2]
+	if podInfo1.ratesum == 0 {
+		fmt.Println("选择空闲pod1", podip1)
+		return podip1
+	} else if podInfo2.ratesum == 0 {
+		fmt.Println("选择空闲pod2", podip2)
+		return podip2
+	} else {
+		return ""
 	}
 }
 
@@ -136,6 +157,8 @@ func SetlastArriveTime(time string) {
 func GenRate() string {
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-	index := rng.Intn(20)
+	// index := rng.Intn(20)
+	index := rng.Intn(10)
+	index += 10
 	return strconv.Itoa(Joblen[index])
 }

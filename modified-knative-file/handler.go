@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptrace"
 	"net/http/httputil"
 	"strconv"
 	"strings"
@@ -123,7 +124,7 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rate := r.Header.Get("X-Rate")
 		last_arrive_timestamp := shared.GetlastArriveTime()
 		last_rate := shared.GetLastRate()
-		if last_arrive_timestamp != "" && last_rate != "" { // 检查两次到达时间的差是否<=1000ms，以及这次的rate是否小于上次的rate，如果二者有一不满足，last_rate设为空
+		if last_arrive_timestamp != "" && last_rate != "" { // 检查两次到达时间的差是否<=最大等待时间，以及这次的rate是否小于上次的rate，如果二者有一不满足，last_rate设为空
 			last_arrive_time, _ := strconv.ParseInt(last_arrive_timestamp, 10, 64)
 			arrive_time, _ := strconv.ParseInt(arrive_timestamp, 10, 64)
 			rate_int, _ := strconv.Atoi(rate)
@@ -131,7 +132,7 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if arrive_time-last_arrive_time > int64(shared.MaxWaitingTime) || rate_int >= last_rate_int {
 				last_rate = ""
 			}
-
+			fmt.Println(arrive_time-last_arrive_time, rate, "啊啊啊啊啊啊啊啊啊啊啊")
 		}
 		shared.SetlastArriveTime(arrive_timestamp)
 		shared.SetLastRate(rate)
@@ -173,8 +174,10 @@ func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.Resp
 
 	// 调度成功，将目标pod的ip和当前任务的rate加入到requestStatic中
 	rate, _ := strconv.Atoi(r.Header.Get("X-Rate"))
-	shared.AddReqToRS(target, rate)
-	fmt.Println("请求调度成功", target, rate)
+	targetip := strings.Split(target, ":")[0]
+	shared.AddReqToRS(targetip, rate)
+	fmt.Println("请求调度成功", targetip, rate)
+	shared.PrintRequestStatic()
 
 	// Set up the reverse proxy.
 	hostOverride := pkghttp.NoHostOverride
@@ -199,6 +202,43 @@ func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.Resp
 		pkghandler.Error(a.logger.With(zap.String(logkey.Key, revID.String())))(w, req, err)
 	}
 
+	// 从请求的上下文中获取schedulingDone通道
+	schedulingDone, ok := r.Context().Value(shared.SchedulingDoneKey).(chan struct{})
+
+	// 设置 httptrace.ClientTrace，用于在请求发送后关闭 schedulingDone 通道
+	trace := &httptrace.ClientTrace{
+		WroteRequest: func(info httptrace.WroteRequestInfo) {
+			if ok {
+				fmt.Println("_______请求已发往目标pod，准备关闭schedulingDone通道_______")
+				close(schedulingDone)
+			} else {
+				fmt.Println("_______请求已发往目标pod，但schedulingDone通道不存在_______")
+			}
+		},
+	}
+
+	// 将 ClientTrace 添加到请求的上下文中
+	r = r.WithContext(httptrace.WithClientTrace(r.Context(), trace))
+
+	// 自定义ReverseProxy并设置Director函数
+	proxy = &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			// 将原始请求的上下文复制到新的请求中
+			req = req.WithContext(r.Context())
+			// 设置目标 URL 和 Host
+			req.URL.Scheme = "http"
+			req.URL.Host = target
+			req.Host = target
+			// 复制原始请求的 Header
+			req.Header = r.Header.Clone()
+		},
+		Transport:     proxy.Transport,
+		BufferPool:    proxy.BufferPool,
+		FlushInterval: proxy.FlushInterval,
+		ErrorHandler:  proxy.ErrorHandler,
+	}
+
+	// 将请求发往目标pod
 	proxy.ServeHTTP(w, r)
 }
 
