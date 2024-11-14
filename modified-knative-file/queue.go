@@ -1,10 +1,12 @@
 package shared
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -15,10 +17,14 @@ type SchedulingUnit struct {
 	Done    chan struct{} // 用于通知请求执行完成的通道，执行完了HandlerFunc才能关闭，否则会丢失上下文
 }
 
-// 用于存储请求的队列。channel本身就是线程安全的，不需要额外配置sync.Cond。10000是队列最大长度而非字节数
-var ActivatorQueue = make(chan SchedulingUnit, 10000)
+// 用于存储请求的线程安全队列
+var (
+	ActivatorQueue = list.New()
+	QueueMutex     sync.Mutex
+	QueueCond      = sync.NewCond(&QueueMutex) // 添加条件变量
+)
 
-const TmpTaskTime = 50 // 暂定的任务执行时间，应该换为队头任务实际的执行时间（只不过现在rate和具体时间还没对上）
+const MaxQueueSize = 10000 // 定义队列的最大容量
 
 func (u *SchedulingUnit) GetRate() int {
 	ratestr := u.Req.Header.Get("X-Rate")
@@ -28,7 +34,16 @@ func (u *SchedulingUnit) GetRate() int {
 
 func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan struct{}) {
 	u := SchedulingUnit{Handler: h, Writer: w, Req: r, Done: done}
-	ActivatorQueue <- u // 将请求加入队列
+	QueueMutex.Lock()
+	if ActivatorQueue.Len() >= MaxQueueSize {
+		QueueMutex.Unlock()
+		// 队列已满，返回服务器繁忙错误
+		http.Error(w, "服务器繁忙，请稍后再试。", http.StatusServiceUnavailable)
+		return
+	}
+	ActivatorQueue.PushBack(u) // 将请求加入队列
+	QueueCond.Signal()         // 通知等待的协程
+	QueueMutex.Unlock()
 }
 
 // 定义一个公共的上下文键类型，不能直接用string（静态检查为了防止混淆不让用内置基本类型）
@@ -39,8 +54,16 @@ const SchedulingDoneKey ContextKey = "schedulingDone"
 // 管理调度策略的主函数，在main.go中作为goroutine运行
 func ManageQueue() {
 	for {
-		fmt.Println("现在队列中有", len(ActivatorQueue), "个任务")
-		u := <-ActivatorQueue
+		QueueMutex.Lock()
+		for ActivatorQueue.Len() == 0 {
+			QueueCond.Wait() // 队列为空，阻塞等待
+		}
+		e := ActivatorQueue.Front()
+		ActivatorQueue.Remove(e)
+		QueueMutex.Unlock()
+
+		u := e.Value.(SchedulingUnit)
+		fmt.Println("现在队列中有", ActivatorQueue.Len(), "个任务")
 
 		schedulingDone := make(chan struct{})
 		// 将通道添加到请求的上下文中
@@ -62,13 +85,26 @@ func ManageQueue() {
 			fmt.Println("_______调度阻塞超过5秒，放弃当前任务_______")
 			// ClearActivatorQueue()
 			close(schedulingDone)
+			close(u.Done)
 		}
 	}
 }
 
-// 添加清空 ActivatorQueue 的函数
-func ClearActivatorQueue() {
-	for len(ActivatorQueue) > 0 {
-		<-ActivatorQueue
+// 添加PeekQueueHead函数，用于查看队首元素但不移除
+func PeekQueueHead() (SchedulingUnit, bool) {
+	QueueMutex.Lock()
+	defer QueueMutex.Unlock()
+	if ActivatorQueue.Len() > 0 {
+		e := ActivatorQueue.Front()
+		u := e.Value.(SchedulingUnit)
+		return u, true
 	}
+	return SchedulingUnit{}, false
 }
+
+// 添加清空 ActivatorQueue 的函数
+// func ClearActivatorQueue() {
+// 	for len(ActivatorQueue) > 0 {
+// 		<-ActivatorQueue
+// 	}
+// }

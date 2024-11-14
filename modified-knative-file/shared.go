@@ -12,6 +12,28 @@ import (
 )
 
 var Joblen = []int{8000, 4000, 2000, 1000, 700, 500, 350, 250, 200, 150, 100, 50, 40, 30, 25, 15, 5, 3, 2, 1}
+var JoblenMap = map[int]int{
+	8000: 32000,
+	4000: 16000,
+	2000: 8000,
+	1000: 4000,
+	700:  2800,
+	500:  2000,
+	350:  1400,
+	250:  1000,
+	200:  800,
+	150:  600,
+	100:  400,
+	50:   200,
+	40:   160,
+	30:   120,
+	25:   100,
+	15:   60,
+	5:    20,
+	3:    12,
+	2:    8,
+	1:    4,
+}
 
 type PodInfo struct {
 	reqs    [20]int // rates[i]表示rate为job_len[i]的请求数
@@ -104,6 +126,11 @@ func ChoosePodByRate(podip1 string, podip2 string) string {
 	} else {
 		return podip1
 	}
+}
+
+func CheckPodBusy(podip string) bool { // 占用则返回true
+	podInfo := requestStatic.Data[podip]
+	return podInfo.ratesum != 0
 }
 
 func ChooseIdlePod(podip1 string, podip2 string) string {

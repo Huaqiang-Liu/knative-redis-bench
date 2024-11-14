@@ -40,7 +40,7 @@ import (
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/logging/logkey"
 	"knative.dev/pkg/reconciler"
-	activatorhandler "knative.dev/serving/pkg/activator/handler"
+	"knative.dev/serving/pkg/activator/handler"
 	"knative.dev/serving/pkg/apis/serving"
 	v1 "knative.dev/serving/pkg/apis/serving/v1"
 	revisioninformer "knative.dev/serving/pkg/client/injection/informers/serving/v1/revision"
@@ -192,17 +192,6 @@ func newRevisionThrottler(revID types.NamespacedName,
 	// 	revBreaker = queue.NewBreaker(breakerParams)
 	// 	lbp = newRoundRobinPolicy()
 	// }
-	// 测试延迟绑定策略：activator始终负责负载均衡，cc设为1，用做了检查的轮询
-	// revBreaker = queue.NewBreaker(breakerParams)
-	// lbp = newRoundRobinPolicy()
-
-	// 测试早期绑定策略：activator始终负责负载均衡，用不做检查的纯轮询
-	// revBreaker = queue.NewBreaker(breakerParams)
-	// lbp = pureRoundRobinPolicy()
-
-	// 测试固定等待时间策略
-	// revBreaker = queue.NewBreaker(breakerParams)
-	// lbp = fixedWaitRoundRobinPolicy(shared.MaxWaitingTime)
 
 	// 测试简单抢占策略
 	revBreaker = queue.NewBreaker(breakerParams)
@@ -231,12 +220,8 @@ func (rt *revisionThrottler) acquireDest(ctx context.Context) (func(), *podTrack
 		return noop, rt.clusterIPTracker
 	}
 
-	// 从context中检索lbPolicy
-	policyName := activatorhandler.GetLbPolicy(ctx)
-
-	// 根据lbPolicy选择相应的负载均衡策略
 	var policy lbPolicy
-	switch policyName {
+	switch handler.GetLbPolicy(ctx) {
 	case "simpleRandomChoice2Policy":
 		policy = simpleRandomChoice2Policy()
 		fmt.Println("使用简单随机选择策略")
@@ -247,6 +232,9 @@ func (rt *revisionThrottler) acquireDest(ctx context.Context) (func(), *podTrack
 		policy = unfixedWaitRandomChoice2Policy()
 		fmt.Println("没有指定策略")
 	}
+
+	// policy = newRoundRobinPolicy()
+	// policy = pureRoundRobinPolicy()
 
 	return policy(ctx, rt.assignedTrackers)
 	// return rt.lbPolicy(ctx, rt.assignedTrackers)

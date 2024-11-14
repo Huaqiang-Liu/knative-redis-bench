@@ -22,10 +22,12 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"knative.dev/serving/pkg/activator/handler"
 	"knative.dev/serving/pkg/shared"
 )
 
@@ -107,14 +109,14 @@ func pureRoundRobinPolicy() lbPolicy {
 		if idx >= l {
 			idx = 0
 		}
-		// 直接发target[idx]，然后idx+1，不检查是否Reserve
+		// 直接发target[idx]，然后idx+1，不检查是否空闲
 		p := idx
 		idx = (idx + 1) % l
 		return noop, targets[p]
 	}
 }
 
-// 延迟绑定，每次都要做Reserve检查
+// 延迟绑定，每次都要检查是否空闲
 func newRoundRobinPolicy() lbPolicy {
 	var (
 		mu  sync.Mutex
@@ -129,59 +131,16 @@ func newRoundRobinPolicy() lbPolicy {
 			idx = 0
 		}
 
-		// Now for |targets| elements and check every next one in
-		// round robin fashion.
-		for i := 0; i < l; i++ {
-			p := (idx + i) % l
-			if cb, ok := targets[p].Reserve(ctx); ok {
-				// We want to start with the next index.
-				idx = p + 1
-				return cb, targets[p]
-			}
-		}
-		// We exhausted all the options...
-		return noop, nil
-	}
-}
-
-// 固定等待时间的轮询策略。参数是最高等待时间，如果超过这个时间就不执行Reserve检查，直接作为target返回
-func fixedWaitRoundRobinPolicy(maxWait int) lbPolicy {
-	var (
-		mu  sync.Mutex
-		idx int
-	)
-	return func(ctx context.Context, targets []*podTracker) (func(), *podTracker) {
-		mu.Lock()
-		defer mu.Unlock()
-		// The number of trackers might have shrunk, so reset to 0.
-		l := len(targets)
-		if idx >= l {
-			idx = 0
-		}
-
-		// 设置定时器，超过maxWait毫秒就不执行Reserve检查，直接返回target
-		timer := time.NewTimer(time.Duration(maxWait) * time.Millisecond)
-		defer timer.Stop()
-
 		for {
-			select {
-			case <-timer.C:
-				// 超过最大等待时间，直接返回当前target
-				p := idx % l
-				idx = (idx + 1) % l
-				return noop, targets[p]
-			default:
-				for i := 0; i < l; i++ {
-					p := (idx + i) % l
-					if cb, ok := targets[p].Reserve(ctx); ok {
-						// We want to start with the next index.
-						idx = p + 1
-						return cb, targets[p]
-					}
-					// 运行到这里证明当前pod不空闲，检查是否超过了最大等待时间
+			for i := 0; i < l; i++ {
+				p := (idx + i) % l
+				if !shared.CheckPodBusy(strings.Split(targets[p].dest, ":")[0]) {
+					idx = (p + 1) % l
+					return noop, targets[p]
 				}
 			}
 		}
+
 	}
 }
 
@@ -204,7 +163,6 @@ func simpleRandomChoice2Policy() lbPolicy {
 		}
 		pick1, pick2 := targets[r1], targets[r2]
 
-		// 两个pod都不空闲，直接返回负载较轻的pod
 		pick1ip, pick2ip := strings.Split(pick1.dest, ":")[0], strings.Split(pick2.dest, ":")[0]
 		if pick1ip == shared.ChoosePodByRate(pick1ip, pick2ip) {
 			return noop, pick1
@@ -242,46 +200,48 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 		timer := time.NewTimer(time.Duration(shared.MaxWaitingTime) * time.Millisecond)
 		defer timer.Stop()
 
+		thisrate := handler.GetRate(ctx)
+
 		for {
-			// 先看随机选出的pod有没有空闲的
-			idle := shared.ChooseIdlePod(pick1ip, pick2ip)
-			if pick1ip == idle {
-				return noop, pick1
-			} else if pick2ip == idle {
-				return noop, pick2
-			}
-
-			// 两个pod都有任务正在运行
-			elapsed := time.Since(startTime)
-			if elapsed >= time.Duration(shared.MaxWaitingTime)*time.Millisecond { // Duration默认单位是纳秒
-				return noop, pick1 // TODO: 后面改成选择负载较轻的pod
-			}
-			remainingTime := time.Duration(shared.MaxWaitingTime)*time.Millisecond - elapsed
-
-			// 检查activatorQueue队头是否有元素，以及适不适合抢占
-			if len(shared.ActivatorQueue) > 0 && remainingTime > shared.TmpTaskTime {
-				fmt.Println("现在有一个可以抢占的任务在队头，队列的长度为：", len(shared.ActivatorQueue))
-				// TODO: 以后这个TmpTaskTime要改成该任务rate对应的执行时间
-				// 暂停计时器，处理队首任务
-				timer.Stop()
-				select {
-				case u := <-shared.ActivatorQueue:
-					u.Req.Header.Set("X-LbPolicy", "simpleRandomChoice2Policy")
-					u.Handler.ServeHTTP(u.Writer, u.Req)
-					close(u.Done)
-				default:
-					// 无任务需要处理
-				}
-				// 重启计时器
-				timer.Reset(remainingTime)
-			}
-			// fmt.Println("没有抢占，", remainingTime.Milliseconds(), len(shared.ActivatorQueue))
-
-			// 超过最大等待时间，直接返回二者之中负载较轻的pod
-			if remainingTime <= 0 {
+			select {
+			case <-timer.C:
+				// 超过最大等待时间，直接返回负载较轻的pod
 				if pick1.dest == shared.ChoosePodByRate(pick1.dest, pick2.dest) {
 					return noop, pick1
 				} else {
+					return noop, pick2
+				}
+			default:
+				// 检查ActivatorQueue队头是否有元素，以及适不适合抢占——如果队头任务的rate比当前任务的rate大就能抢占
+				if u, ok := shared.PeekQueueHead(); ok {
+					rateStr := u.Req.Header.Get("X-Rate")
+					rate, _ := strconv.Atoi(rateStr)
+					elapsed := time.Since(startTime)
+					remainingTime := time.Duration(shared.MaxWaitingTime)*time.Millisecond - elapsed
+					if thisrate > rate {
+						timer.Stop()
+
+						fmt.Println("现在有一个可以抢占的任务在队头，队列的长度为：", shared.ActivatorQueue.Len())
+						// 从队列中取出并处理该任务
+						shared.QueueMutex.Lock()
+						e := shared.ActivatorQueue.Front()
+						shared.ActivatorQueue.Remove(e)
+						shared.QueueMutex.Unlock()
+
+						u := e.Value.(shared.SchedulingUnit)
+						u.Req.Header.Set("X-LbPolicy", "simpleRandomChoice2Policy")
+						u.Handler.ServeHTTP(u.Writer, u.Req)
+						close(u.Done)
+
+						timer.Reset(remainingTime)
+					}
+				}
+
+				// 没有可以抢占的任务，看看是否有空闲pod
+				idle := shared.ChooseIdlePod(pick1ip, pick2ip)
+				if pick1ip == idle {
+					return noop, pick1
+				} else if pick2ip == idle {
 					return noop, pick2
 				}
 			}

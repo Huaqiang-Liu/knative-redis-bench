@@ -82,18 +82,26 @@ func New(_ context.Context, t Throttler, transport http.RoundTripper, usePassthr
 	}
 }
 
-// 定义用于在 context 中存储和检索 lbPolicy 的键
+// 定义用于在 context 中存储和检索 lbPolicy和rate 的键
 type lbPolicyKey struct{}
+type rateKey struct{}
 
 // 将lbPolicy存储到context中
-func WithLBPolicy(ctx context.Context, lbPolicy string) context.Context {
-	return context.WithValue(ctx, lbPolicyKey{}, lbPolicy)
+func WithLBPolicyAndRate(ctx context.Context, lbPolicy string, rate string) context.Context {
+	tmp := context.WithValue(ctx, lbPolicyKey{}, lbPolicy)
+	return context.WithValue(tmp, rateKey{}, rate)
 }
 
 // 检索context中存储的lbPolicy
 func GetLbPolicy(ctx context.Context) string {
 	lbPolicy, _ := ctx.Value(lbPolicyKey{}).(string)
 	return lbPolicy
+}
+
+func GetRate(ctx context.Context) int {
+	ratestr, _ := ctx.Value(rateKey{}).(string)
+	rate, _ := strconv.Atoi(ratestr)
+	return rate
 }
 
 func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -109,10 +117,10 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 从请求头中提取lbPolicy，并存储到context中，默认为unfixedWaitRandomChoice2Policy
 	lbPolicy := r.Header.Get("X-LbPolicy")
-	ctx_with_lbpolicy := WithLBPolicy(tryContext, lbPolicy)
+	rate := r.Header.Get("X-Rate")
+	ctx_with_lbpolicy := WithLBPolicyAndRate(tryContext, lbPolicy, rate)
 
-	// 取单位为毫秒的时间戳，作为请求到达activator的时间
-	arrive_timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
+	arrive_timestamp := r.Header.Get("X-Arrive-Timestamp")
 	if err := a.throttler.Try(ctx_with_lbpolicy, revID, func(dest string) error {
 		trySpan.End()
 
@@ -121,7 +129,6 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			proxyCtx, proxySpan = trace.StartSpan(r.Context(), "activator_proxy")
 		}
 
-		rate := r.Header.Get("X-Rate")
 		last_arrive_timestamp := shared.GetlastArriveTime()
 		last_rate := shared.GetLastRate()
 		if last_arrive_timestamp != "" && last_rate != "" { // 检查两次到达时间的差是否<=最大等待时间，以及这次的rate是否小于上次的rate，如果二者有一不满足，last_rate设为空
@@ -137,9 +144,7 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		shared.SetlastArriveTime(arrive_timestamp)
 		shared.SetLastRate(rate)
 
-		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb,
-			arrive_timestamp, // rate,
-			last_rate)
+		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb, last_rate)
 		proxySpan.End()
 
 		return nil
@@ -160,16 +165,13 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // 执行完了负载均衡算法才会回调这个函数，将请求发给pod
 func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.ResponseWriter,
-	r *http.Request, target string, tracingEnabled bool, usePassthroughLb bool,
-	arrive_timestamp string, // rate string,
-	last_rate string) {
+	r *http.Request, target string, tracingEnabled bool, usePassthroughLb bool, last_rate string) {
 	netheader.RewriteHostIn(r)
 	r.Header.Set(netheader.ProxyKey, activator.Name)
 
 	// 添加时间戳到请求头，精确到毫秒
 	timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
 	r.Header.Set("X-Request-Timestamp", timestamp)
-	r.Header.Set("X-Arrive-Timestamp", arrive_timestamp)
 	r.Header.Set("X-Last-Rate", last_rate)
 
 	// 调度成功，将目标pod的ip和当前任务的rate加入到requestStatic中
@@ -264,6 +266,7 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 		r.Header.Set("X-Rate", rate)
 		// 设置“X-LbPolicy”为“unfixedWaitRandomChoice2Policy”，表示当前是正经从队头取出的元素，而不是抢占后不等待的任务（决定使用算法的不同）
 		r.Header.Set("X-LbPolicy", "unfixedWaitRandomChoice2Policy")
+		r.Header.Set("X-Arrive-Timestamp", strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10))
 		// 创建一个用于同步的通道
 		done := make(chan struct{})
 		// 将请求加入队列，传递同步通道
@@ -272,9 +275,9 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 		select {
 		case <-done:
 			fmt.Println("###rate为", rate, "的任务已经执行完成并返回到http.HandlerFunc")
-		case <-time.After(60 * time.Second):
+		case <-time.After(120 * time.Second):
 			fmt.Println("###rate为", rate, "的任务整体超时，终止当前handler并清空ActivatorQueue")
-			shared.ClearActivatorQueue()
+			// shared.ClearActivatorQueue()
 			close(done)
 		}
 	})
