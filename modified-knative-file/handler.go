@@ -114,13 +114,16 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	revID := RevIDFrom(r.Context())
+	fmt.Println("revision id 是；", revID)
 
 	// 从请求头中提取lbPolicy，并存储到context中，默认为unfixedWaitRandomChoice2Policy
 	lbPolicy := r.Header.Get("X-LbPolicy")
 	rate := r.Header.Get("X-Rate")
 	ctx_with_lbpolicy := WithLBPolicyAndRate(tryContext, lbPolicy, rate)
 
-	arrive_timestamp := r.Header.Get("X-Arrive-Timestamp")
+	arrive_timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
+	r.Header.Set("X-Arrive-Timestamp", arrive_timestamp)
+	// arrive_timestamp := r.Header.Get("X-Arrive-Timestamp")
 	if err := a.throttler.Try(ctx_with_lbpolicy, revID, func(dest string) error {
 		trySpan.End()
 
@@ -266,7 +269,7 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 		r.Header.Set("X-Rate", rate)
 		// 设置“X-LbPolicy”为“unfixedWaitRandomChoice2Policy”，表示当前是正经从队头取出的元素，而不是抢占后不等待的任务（决定使用算法的不同）
 		r.Header.Set("X-LbPolicy", "unfixedWaitRandomChoice2Policy")
-		r.Header.Set("X-Arrive-Timestamp", strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10))
+		// r.Header.Set("X-Arrive-Timestamp", strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10))
 		// 创建一个用于同步的通道
 		done := make(chan struct{})
 		// 将请求加入队列，传递同步通道

@@ -49,7 +49,7 @@ var requestStatic = &RequestStatic{
 	Data: make(map[string]PodInfo),
 }
 
-var MaxWaitingTime = 500
+var MaxWaitingTime = 1000 / 50 // 500
 
 func PrintRequestStatic() {
 	requestStatic.RLock()

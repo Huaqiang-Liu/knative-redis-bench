@@ -221,8 +221,8 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 					if thisrate > rate {
 						timer.Stop()
 
-						fmt.Println("现在有一个可以抢占的任务在队头，队列的长度为：", shared.ActivatorQueue.Len())
-						// 从队列中取出并处理该任务
+						// fmt.Println("现在有一个可以抢占的任务在队头，队列的长度为：", shared.ActivatorQueue.Len())
+						// 从队列中取出被抢占的任务
 						shared.QueueMutex.Lock()
 						e := shared.ActivatorQueue.Front()
 						shared.ActivatorQueue.Remove(e)
@@ -230,9 +230,30 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 
 						u := e.Value.(shared.SchedulingUnit)
 						u.Req.Header.Set("X-LbPolicy", "simpleRandomChoice2Policy")
-						u.Handler.ServeHTTP(u.Writer, u.Req)
-						close(u.Done)
 
+						// 从被抢占任务的请求上下文中获取 schedulingDone 通道
+						schedulingDone, ok := u.Req.Context().Value(shared.SchedulingDoneKey).(chan struct{})
+						if !ok {
+							fmt.Println("错误：未找到当前抢占任务的schedulingDone通道")
+						}
+
+						// 异步执行抢占任务的ServeHTTP方法
+						go func(u shared.SchedulingUnit) {
+							u.Handler.ServeHTTP(u.Writer, u.Req)
+							fmt.Println("_______抢占的任务执行完毕_______")
+							close(u.Done)
+						}(u)
+
+						// 等待被抢占任务完成调度
+						select {
+						case <-schedulingDone:
+							fmt.Println("抢占的任务已经完成调度")
+						case <-time.After(5 * time.Second):
+							fmt.Println("抢占的任务调度超时")
+							close(u.Done)
+						}
+
+						// 重置计时器，继续当前任务的调度
 						timer.Reset(remainingTime)
 					}
 				}

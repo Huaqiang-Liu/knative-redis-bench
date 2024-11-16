@@ -25,6 +25,10 @@ var (
 )
 
 const MaxQueueSize = 10000 // 定义队列的最大容量
+// 定义一个公共的上下文键类型，不能直接用string（静态检查为了防止混淆不让用内置基本类型）
+type ContextKey string
+
+const SchedulingDoneKey ContextKey = "schedulingDone"
 
 func (u *SchedulingUnit) GetRate() int {
 	ratestr := u.Req.Header.Get("X-Rate")
@@ -33,23 +37,23 @@ func (u *SchedulingUnit) GetRate() int {
 }
 
 func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan struct{}) {
-	u := SchedulingUnit{Handler: h, Writer: w, Req: r, Done: done}
+	// 创建 schedulingDone 通道并添加到请求的上下文中
+	schedulingDone := make(chan struct{})
+	ctx := context.WithValue(r.Context(), SchedulingDoneKey, schedulingDone)
+
+	u := SchedulingUnit{Handler: h, Writer: w, Req: r.WithContext(ctx), Done: done}
 	QueueMutex.Lock()
 	if ActivatorQueue.Len() >= MaxQueueSize {
 		QueueMutex.Unlock()
 		// 队列已满，返回服务器繁忙错误
 		http.Error(w, "服务器繁忙，请稍后再试。", http.StatusServiceUnavailable)
+		close(done)
 		return
 	}
 	ActivatorQueue.PushBack(u) // 将请求加入队列
 	QueueCond.Signal()         // 通知等待的协程
 	QueueMutex.Unlock()
 }
-
-// 定义一个公共的上下文键类型，不能直接用string（静态检查为了防止混淆不让用内置基本类型）
-type ContextKey string
-
-const SchedulingDoneKey ContextKey = "schedulingDone"
 
 // 管理调度策略的主函数，在main.go中作为goroutine运行
 func ManageQueue() {
@@ -65,11 +69,6 @@ func ManageQueue() {
 		u := e.Value.(SchedulingUnit)
 		fmt.Println("现在队列中有", ActivatorQueue.Len(), "个任务")
 
-		schedulingDone := make(chan struct{})
-		// 将通道添加到请求的上下文中
-		ctx := context.WithValue(u.Req.Context(), SchedulingDoneKey, schedulingDone)
-		u.Req = u.Req.WithContext(ctx)
-
 		// 在新的 goroutine 中执行 ServeHTTP
 		go func(u SchedulingUnit) {
 			u.Handler.ServeHTTP(u.Writer, u.Req)
@@ -79,12 +78,12 @@ func ManageQueue() {
 
 		// 等待调度完成，立即处理下一个请求
 		select {
-		case <-schedulingDone:
+		case <-u.Req.Context().Value(SchedulingDoneKey).(chan struct{}):
 			fmt.Println("_______当前任务调度完毕，准备处理下一个请求_______")
 		case <-time.After(5 * time.Second):
 			fmt.Println("_______调度阻塞超过5秒，放弃当前任务_______")
 			// ClearActivatorQueue()
-			close(schedulingDone)
+			// close(schedulingDone)
 			close(u.Done)
 		}
 	}
@@ -102,6 +101,12 @@ func PeekQueueHead() (SchedulingUnit, bool) {
 	return SchedulingUnit{}, false
 }
 
+// 添加清空 ActivatorQueue 的函数
+// func ClearActivatorQueue() {
+// 	for len(ActivatorQueue) > 0 {
+// 		<-ActivatorQueue
+// 	}
+// }
 // 添加清空 ActivatorQueue 的函数
 // func ClearActivatorQueue() {
 // 	for len(ActivatorQueue) > 0 {
