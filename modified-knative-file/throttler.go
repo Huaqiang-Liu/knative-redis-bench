@@ -18,7 +18,6 @@ package net
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"sort"
 	"sync"
@@ -40,7 +39,6 @@ import (
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/logging/logkey"
 	"knative.dev/pkg/reconciler"
-	"knative.dev/serving/pkg/activator/handler"
 	"knative.dev/serving/pkg/apis/serving"
 	v1 "knative.dev/serving/pkg/apis/serving/v1"
 	revisioninformer "knative.dev/serving/pkg/client/injection/informers/serving/v1/revision"
@@ -221,20 +219,17 @@ func (rt *revisionThrottler) acquireDest(ctx context.Context) (func(), *podTrack
 	}
 
 	var policy lbPolicy
-	switch handler.GetLbPolicy(ctx) {
-	case "simpleRandomChoice2Policy":
-		policy = simpleRandomChoice2Policy()
-		fmt.Println("使用简单随机选择策略")
-	case "unfixedWaitRandomChoice2Policy":
-		policy = unfixedWaitRandomChoice2Policy()
-		fmt.Println("使用简单抢占策略")
-	default:
-		policy = unfixedWaitRandomChoice2Policy()
-		fmt.Println("没有指定策略")
-	}
+	// switch handler.GetLbPolicy(ctx) {
+	// case "simpleRandomChoice2Policy":
+	// 	policy = simpleRandomChoice2Policy()
+	// case "unfixedWaitRandomChoice2Policy":
+	// 	policy = unfixedWaitRandomChoice2Policy()
+	// default:
+	// 	policy = unfixedWaitRandomChoice2Policy()
+	// }
 
 	// policy = newRoundRobinPolicy()
-	// policy = simpleRandomChoice2Policy()
+	policy = simpleRandomChoice2Policy()
 
 	return policy(ctx, rt.assignedTrackers)
 	// return rt.lbPolicy(ctx, rt.assignedTrackers)

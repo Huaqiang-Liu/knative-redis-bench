@@ -22,12 +22,9 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
-	"knative.dev/serving/pkg/activator/handler"
 	"knative.dev/serving/pkg/shared"
 )
 
@@ -144,7 +141,7 @@ func newRoundRobinPolicy() lbPolicy {
 	}
 }
 
-// 不开计时器，直接随机从targets中选两个，将当前负载轻的作为target
+// 早期绑定的power of 2
 func simpleRandomChoice2Policy() lbPolicy {
 	var (
 		mu sync.Mutex
@@ -165,6 +162,7 @@ func simpleRandomChoice2Policy() lbPolicy {
 
 		pick1ip, pick2ip := strings.Split(pick1.dest, ":")[0], strings.Split(pick2.dest, ":")[0]
 		if pick1ip == shared.ChoosePodByRate(pick1ip, pick2ip) {
+			// if pick1ip == shared.ChoosePodByNumOfJobs(pick1ip, pick2ip) {
 			return noop, pick1
 		} else {
 			return noop, pick2
@@ -172,7 +170,7 @@ func simpleRandomChoice2Policy() lbPolicy {
 	}
 }
 
-// 支持简单抢占的power of two
+// 延迟绑定的power of 2
 func unfixedWaitRandomChoice2Policy() lbPolicy {
 	var (
 		mu sync.Mutex
@@ -195,76 +193,13 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 		pick1ip, pick2ip := strings.Split(pick1.dest, ":")[0], strings.Split(pick2.dest, ":")[0]
 
 		fmt.Println("现在有两个pod可以选择，分别是：", pick1.dest, pick2.dest)
-
-		startTime := time.Now()
-		timer := time.NewTimer(time.Duration(shared.MaxWaitingTime) * time.Millisecond)
-		defer timer.Stop()
-
-		thisrate := handler.GetRate(ctx)
-
 		for {
-			select {
-			case <-timer.C:
-				// 超过最大等待时间，直接返回负载较轻的pod
-				if pick1.dest == shared.ChoosePodByRate(pick1.dest, pick2.dest) {
-					return noop, pick1
-				} else {
-					return noop, pick2
-				}
-			default:
-				// 检查ActivatorQueue队头是否有元素，以及适不适合抢占——如果队头任务的rate比当前任务的rate大就能抢占
-				if u, ok := shared.PeekQueueHead(); ok {
-					rateStr := u.Req.Header.Get("X-Rate")
-					rate, _ := strconv.Atoi(rateStr)
-					elapsed := time.Since(startTime)
-					remainingTime := time.Duration(shared.MaxWaitingTime)*time.Millisecond - elapsed
-					if thisrate > rate {
-						timer.Stop()
-
-						// fmt.Println("现在有一个可以抢占的任务在队头，队列的长度为：", shared.ActivatorQueue.Len())
-						// 从队列中取出被抢占的任务
-						shared.QueueMutex.Lock()
-						e := shared.ActivatorQueue.Front()
-						shared.ActivatorQueue.Remove(e)
-						shared.QueueMutex.Unlock()
-
-						u := e.Value.(shared.SchedulingUnit)
-						u.Req.Header.Set("X-LbPolicy", "simpleRandomChoice2Policy")
-
-						// 从被抢占任务的请求上下文中获取 schedulingDone 通道
-						schedulingDone, ok := u.Req.Context().Value(shared.SchedulingDoneKey).(chan struct{})
-						if !ok {
-							fmt.Println("错误：未找到当前抢占任务的schedulingDone通道")
-						}
-
-						// 异步执行抢占任务的ServeHTTP方法
-						go func(u shared.SchedulingUnit) {
-							u.Handler.ServeHTTP(u.Writer, u.Req)
-							fmt.Println("_______抢占的任务执行完毕_______")
-							close(u.Done)
-						}(u)
-
-						// 等待被抢占任务完成调度
-						select {
-						case <-schedulingDone:
-							fmt.Println("抢占的任务已经完成调度")
-						case <-time.After(5 * time.Second):
-							fmt.Println("抢占的任务调度超时")
-							close(u.Done)
-						}
-
-						// 重置计时器，继续当前任务的调度
-						timer.Reset(remainingTime)
-					}
-				}
-
-				// 没有可以抢占的任务，看看是否有空闲pod
-				idle := shared.ChooseIdlePod(pick1ip, pick2ip)
-				if pick1ip == idle {
-					return noop, pick1
-				} else if pick2ip == idle {
-					return noop, pick2
-				}
+			// 看看是否有空闲pod
+			idle := shared.ChooseIdlePod(pick1ip, pick2ip)
+			if pick1ip == idle {
+				return noop, pick1
+			} else if pick2ip == idle {
+				return noop, pick2
 			}
 		}
 	}

@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptrace"
 	"net/http/httputil"
 	"strconv"
 	"strings"
@@ -87,9 +86,8 @@ type lbPolicyKey struct{}
 type rateKey struct{}
 
 // 将lbPolicy存储到context中
-func WithLBPolicyAndRate(ctx context.Context, lbPolicy string, rate string) context.Context {
-	tmp := context.WithValue(ctx, lbPolicyKey{}, lbPolicy)
-	return context.WithValue(tmp, rateKey{}, rate)
+func WithLBPolicy(ctx context.Context, lbPolicy string) context.Context {
+	return context.WithValue(ctx, lbPolicyKey{}, lbPolicy)
 }
 
 // 检索context中存储的lbPolicy
@@ -118,11 +116,9 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 从请求头中提取lbPolicy，并存储到context中，默认为unfixedWaitRandomChoice2Policy
 	lbPolicy := r.Header.Get("X-LbPolicy")
-	rate := r.Header.Get("X-Rate")
-	ctx_with_lbpolicy := WithLBPolicyAndRate(tryContext, lbPolicy, rate)
+	// rate := r.Header.Get("X-Rate")
+	ctx_with_lbpolicy := WithLBPolicy(tryContext, lbPolicy)
 
-	arrive_timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
-	r.Header.Set("X-Arrive-Timestamp", arrive_timestamp)
 	// arrive_timestamp := r.Header.Get("X-Arrive-Timestamp")
 	if err := a.throttler.Try(ctx_with_lbpolicy, revID, func(dest string) error {
 		trySpan.End()
@@ -132,22 +128,23 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			proxyCtx, proxySpan = trace.StartSpan(r.Context(), "activator_proxy")
 		}
 
-		last_arrive_timestamp := shared.GetlastArriveTime()
-		last_rate := shared.GetLastRate()
-		if last_arrive_timestamp != "" && last_rate != "" { // 检查两次到达时间的差是否<=最大等待时间，以及这次的rate是否小于上次的rate，如果二者有一不满足，last_rate设为空
-			last_arrive_time, _ := strconv.ParseInt(last_arrive_timestamp, 10, 64)
-			arrive_time, _ := strconv.ParseInt(arrive_timestamp, 10, 64)
-			rate_int, _ := strconv.Atoi(rate)
-			last_rate_int, _ := strconv.Atoi(last_rate)
-			if arrive_time-last_arrive_time > int64(shared.MaxWaitingTime) || rate_int >= last_rate_int {
-				last_rate = ""
-			}
-			fmt.Println(arrive_time-last_arrive_time, rate, "啊啊啊啊啊啊啊啊啊啊啊")
-		}
-		shared.SetlastArriveTime(arrive_timestamp)
-		shared.SetLastRate(rate)
+		// last_arrive_timestamp := shared.GetlastArriveTime()
+		// last_rate := shared.GetLastRate()
+		// if last_arrive_timestamp != "" && last_rate != "" { // 检查两次到达时间的差是否<=最大等待时间，以及这次的rate是否小于上次的rate，如果二者有一不满足，last_rate设为空
+		// 	last_arrive_time, _ := strconv.ParseInt(last_arrive_timestamp, 10, 64)
+		// 	arrive_time, _ := strconv.ParseInt(arrive_timestamp, 10, 64)
+		// 	rate_int, _ := strconv.Atoi(rate)
+		// 	last_rate_int, _ := strconv.Atoi(last_rate)
+		// 	if arrive_time-last_arrive_time > int64(shared.MaxWaitingTime) || rate_int >= last_rate_int {
+		// 		last_rate = ""
+		// 	}
+		// }
+		// shared.SetlastArriveTime(arrive_timestamp)
+		// shared.SetLastRate(rate)
 
-		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb, last_rate)
+		// 修改队列实现方式之后，方便起见将last_rate设为本任务抢占的任务的rate
+
+		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb)
 		proxySpan.End()
 
 		return nil
@@ -168,21 +165,20 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // 执行完了负载均衡算法才会回调这个函数，将请求发给pod
 func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.ResponseWriter,
-	r *http.Request, target string, tracingEnabled bool, usePassthroughLb bool, last_rate string) {
+	r *http.Request, target string, tracingEnabled bool, usePassthroughLb bool) {
 	netheader.RewriteHostIn(r)
 	r.Header.Set(netheader.ProxyKey, activator.Name)
 
 	// 添加时间戳到请求头，精确到毫秒
 	timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
 	r.Header.Set("X-Request-Timestamp", timestamp)
-	r.Header.Set("X-Last-Rate", last_rate)
 
 	// 调度成功，将目标pod的ip和当前任务的rate加入到requestStatic中
 	rate, _ := strconv.Atoi(r.Header.Get("X-Rate"))
 	targetip := strings.Split(target, ":")[0]
 	shared.AddReqToRS(targetip, rate)
-	fmt.Println("请求调度成功", targetip, rate)
-	shared.PrintRequestStatic()
+	// fmt.Println("请求调度成功", targetip, rate)
+	// shared.PrintRequestStatic()
 
 	// Set up the reverse proxy.
 	hostOverride := pkghttp.NoHostOverride
@@ -205,42 +201,6 @@ func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.Resp
 	proxy.FlushInterval = netproxy.FlushInterval
 	proxy.ErrorHandler = func(w http.ResponseWriter, req *http.Request, err error) {
 		pkghandler.Error(a.logger.With(zap.String(logkey.Key, revID.String())))(w, req, err)
-	}
-
-	// 从请求的上下文中获取schedulingDone通道
-	schedulingDone, ok := r.Context().Value(shared.SchedulingDoneKey).(chan struct{})
-
-	// 设置 httptrace.ClientTrace，用于在请求发送后关闭 schedulingDone 通道
-	trace := &httptrace.ClientTrace{
-		WroteRequest: func(info httptrace.WroteRequestInfo) {
-			if ok {
-				fmt.Println("_______请求已发往目标pod，准备关闭schedulingDone通道_______")
-				close(schedulingDone)
-			} else {
-				fmt.Println("_______请求已发往目标pod，但schedulingDone通道不存在_______")
-			}
-		},
-	}
-
-	// 将 ClientTrace 添加到请求的上下文中
-	r = r.WithContext(httptrace.WithClientTrace(r.Context(), trace))
-
-	// 自定义ReverseProxy并设置Director函数
-	proxy = &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			// 将原始请求的上下文复制到新的请求中
-			req = req.WithContext(r.Context())
-			// 设置目标 URL 和 Host
-			req.URL.Scheme = "http"
-			req.URL.Host = target
-			req.Host = target
-			// 复制原始请求的 Header
-			req.Header = r.Header.Clone()
-		},
-		Transport:     proxy.Transport,
-		BufferPool:    proxy.BufferPool,
-		FlushInterval: proxy.FlushInterval,
-		ErrorHandler:  proxy.ErrorHandler,
 	}
 
 	// 将请求发往目标pod
@@ -269,7 +229,8 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 		r.Header.Set("X-Rate", rate)
 		// 设置“X-LbPolicy”为“unfixedWaitRandomChoice2Policy”，表示当前是正经从队头取出的元素，而不是抢占后不等待的任务（决定使用算法的不同）
 		r.Header.Set("X-LbPolicy", "unfixedWaitRandomChoice2Policy")
-		// r.Header.Set("X-Arrive-Timestamp", strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10))
+		r.Header.Set("X-Arrive-Timestamp", strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10))
+		r.Header.Set("X-Last-Rate", "")
 		// 创建一个用于同步的通道
 		done := make(chan struct{})
 		// 将请求加入队列，传递同步通道
@@ -279,7 +240,7 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 		case <-done:
 			fmt.Println("###rate为", rate, "的任务已经执行完成并返回到http.HandlerFunc")
 		case <-time.After(120 * time.Second):
-			fmt.Println("###rate为", rate, "的任务整体超时，终止当前handler并清空ActivatorQueue")
+			fmt.Println("###rate为", rate, "的任务整体超时，不管了直接关done通道")
 			// shared.ClearActivatorQueue()
 			close(done)
 		}

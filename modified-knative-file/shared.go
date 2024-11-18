@@ -35,9 +35,33 @@ var JoblenMap = map[int]int{
 	1:    4,
 }
 
+var RateIndexMap = map[int]int{
+	8000: 19,
+	4000: 18,
+	2000: 17,
+	1000: 16,
+	700:  15,
+	500:  14,
+	350:  13,
+	250:  12,
+	200:  11,
+	150:  10,
+	100:  9,
+	50:   8,
+	40:   7,
+	30:   6,
+	25:   5,
+	15:   4,
+	5:    3,
+	3:    2,
+	2:    1,
+	1:    0,
+}
+
 type PodInfo struct {
 	reqs    [20]int // rates[i]表示rate为job_len[i]的请求数
 	ratesum int
+	jobnum  int
 }
 
 type RequestStatic struct {
@@ -49,7 +73,7 @@ var requestStatic = &RequestStatic{
 	Data: make(map[string]PodInfo),
 }
 
-var MaxWaitingTime = 1000 / 50 // 500
+var MaxWaitingTime = 1000 / 50 // 1000/lambda
 
 func PrintRequestStatic() {
 	requestStatic.RLock()
@@ -72,6 +96,7 @@ func AddReqToRS(podip string, rate int) {
 		requestStatic.Data[podip] = PodInfo{
 			reqs:    [20]int{}, // 数组的元素默认值就是0
 			ratesum: 0,
+			jobnum:  0,
 		}
 	}
 	// rate的值是Joblen中的某个值，取index为这个值对应的下标
@@ -88,6 +113,7 @@ func AddReqToRS(podip string, rate int) {
 	podInfo := requestStatic.Data[podip]
 	podInfo.reqs[index]++
 	podInfo.ratesum += rate
+	podInfo.jobnum++
 	requestStatic.Data[podip] = podInfo
 }
 
@@ -112,6 +138,7 @@ func DelReqFromRS(podip string, rate int) {
 	if podInfo.reqs[index] > 0 {
 		podInfo.reqs[index]--
 		podInfo.ratesum -= rate
+		podInfo.jobnum--
 	}
 	requestStatic.Data[podip] = podInfo
 }
@@ -122,6 +149,17 @@ func ChoosePodByRate(podip1 string, podip2 string) string {
 	podInfo2 := requestStatic.Data[podip2]
 	fmt.Println("两个pod上的总rate数分别为：", podInfo1.ratesum, podInfo2.ratesum)
 	if podInfo1.ratesum > podInfo2.ratesum {
+		return podip2
+	} else {
+		return podip1
+	}
+}
+
+func ChoosePodByNumOfJobs(podip1 string, podip2 string) string {
+	podInfo1 := requestStatic.Data[podip1]
+	podInfo2 := requestStatic.Data[podip2]
+
+	if podInfo1.jobnum > podInfo2.jobnum {
 		return podip2
 	} else {
 		return podip1

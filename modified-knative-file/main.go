@@ -234,7 +234,9 @@ func main() {
 	}()
 
 	// 处理队列中的请求，调换顺序等等
-	go shared.ManageQueue()
+	for ind := 19; ind >= 0; ind-- {
+		go shared.ManageQueue(ind)
+	}
 
 	// Create and run our concurrency reporter
 	concurrencyReporter := activatorhandler.NewConcurrencyReporter(ctx, env.PodName, statCh)
