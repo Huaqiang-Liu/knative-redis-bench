@@ -128,20 +128,6 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			proxyCtx, proxySpan = trace.StartSpan(r.Context(), "activator_proxy")
 		}
 
-		// last_arrive_timestamp := shared.GetlastArriveTime()
-		// last_rate := shared.GetLastRate()
-		// if last_arrive_timestamp != "" && last_rate != "" { // 检查两次到达时间的差是否<=最大等待时间，以及这次的rate是否小于上次的rate，如果二者有一不满足，last_rate设为空
-		// 	last_arrive_time, _ := strconv.ParseInt(last_arrive_timestamp, 10, 64)
-		// 	arrive_time, _ := strconv.ParseInt(arrive_timestamp, 10, 64)
-		// 	rate_int, _ := strconv.Atoi(rate)
-		// 	last_rate_int, _ := strconv.Atoi(last_rate)
-		// 	if arrive_time-last_arrive_time > int64(shared.MaxWaitingTime) || rate_int >= last_rate_int {
-		// 		last_rate = ""
-		// 	}
-		// }
-		// shared.SetlastArriveTime(arrive_timestamp)
-		// shared.SetLastRate(rate)
-
 		// 修改队列实现方式之后，方便起见将last_rate设为本任务抢占的任务的rate
 
 		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb)

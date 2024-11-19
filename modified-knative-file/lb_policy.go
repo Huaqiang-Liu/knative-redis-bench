@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"time"
 
 	"knative.dev/serving/pkg/shared"
 )
@@ -193,13 +194,25 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 		pick1ip, pick2ip := strings.Split(pick1.dest, ":")[0], strings.Split(pick2.dest, ":")[0]
 
 		fmt.Println("现在有两个pod可以选择，分别是：", pick1.dest, pick2.dest)
+		// 打开计时器，最多等待shared.MaxWaitingTime
+		timer := time.NewTimer(time.Duration(shared.MaxWaitingTime) * time.Millisecond)
 		for {
-			// 看看是否有空闲pod
-			idle := shared.ChooseIdlePod(pick1ip, pick2ip)
-			if pick1ip == idle {
-				return noop, pick1
-			} else if pick2ip == idle {
-				return noop, pick2
+			select {
+			case <-timer.C:
+				target := shared.ChoosePodByRate(pick1ip, pick2ip)
+				if pick1ip == target {
+					return noop, pick1
+				} else {
+					return noop, pick2
+				}
+			default:
+				// 看看是否有空闲pod
+				idle := shared.ChooseIdlePod(pick1ip, pick2ip)
+				if pick1ip == idle {
+					return noop, pick1
+				} else if pick2ip == idle {
+					return noop, pick2
+				}
 			}
 		}
 	}

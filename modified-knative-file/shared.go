@@ -35,29 +35,6 @@ var JoblenMap = map[int]int{
 	1:    4,
 }
 
-var RateIndexMap = map[int]int{
-	8000: 19,
-	4000: 18,
-	2000: 17,
-	1000: 16,
-	700:  15,
-	500:  14,
-	350:  13,
-	250:  12,
-	200:  11,
-	150:  10,
-	100:  9,
-	50:   8,
-	40:   7,
-	30:   6,
-	25:   5,
-	15:   4,
-	5:    3,
-	3:    2,
-	2:    1,
-	1:    0,
-}
-
 type PodInfo struct {
 	reqs    [20]int // rates[i]表示rate为job_len[i]的请求数
 	ratesum int
