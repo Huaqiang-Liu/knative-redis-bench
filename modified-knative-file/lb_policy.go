@@ -162,8 +162,8 @@ func simpleRandomChoice2Policy() lbPolicy {
 		pick1, pick2 := targets[r1], targets[r2]
 
 		pick1ip, pick2ip := strings.Split(pick1.dest, ":")[0], strings.Split(pick2.dest, ":")[0]
-		if pick1ip == shared.ChoosePodByRate(pick1ip, pick2ip) {
-			// if pick1ip == shared.ChoosePodByNumOfJobs(pick1ip, pick2ip) {
+		// if pick1ip == shared.ChoosePodByRate(pick1ip, pick2ip) {
+		if pick1ip == shared.ChoosePodByNumOfJobs(pick1ip, pick2ip) {
 			return noop, pick1
 		} else {
 			return noop, pick2
