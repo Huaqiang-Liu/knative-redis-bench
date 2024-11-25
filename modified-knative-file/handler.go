@@ -19,7 +19,6 @@ package handler
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
@@ -86,8 +85,9 @@ type lbPolicyKey struct{}
 type rateKey struct{}
 
 // 将lbPolicy存储到context中
-func WithLBPolicy(ctx context.Context, lbPolicy string) context.Context {
-	return context.WithValue(ctx, lbPolicyKey{}, lbPolicy)
+func WithLBPolicyAndRate(ctx context.Context, lbPolicy string, rate string) context.Context {
+	tmp := context.WithValue(ctx, lbPolicyKey{}, lbPolicy)
+	return context.WithValue(tmp, rateKey{}, rate)
 }
 
 // 检索context中存储的lbPolicy
@@ -112,12 +112,12 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	revID := RevIDFrom(r.Context())
-	fmt.Println("revision id 是；", revID)
+	// fmt.Println("revision id 是；", revID)
 
 	// 从请求头中提取lbPolicy，并存储到context中，默认为unfixedWaitRandomChoice2Policy
 	lbPolicy := r.Header.Get("X-LbPolicy")
-	// rate := r.Header.Get("X-Rate")
-	ctx_with_lbpolicy := WithLBPolicy(tryContext, lbPolicy)
+	rate := r.Header.Get("X-Rate")
+	ctx_with_lbpolicy := WithLBPolicyAndRate(tryContext, lbPolicy, rate)
 
 	// arrive_timestamp := r.Header.Get("X-Arrive-Timestamp")
 	if err := a.throttler.Try(ctx_with_lbpolicy, revID, func(dest string) error {
@@ -155,14 +155,15 @@ func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.Resp
 	netheader.RewriteHostIn(r)
 	r.Header.Set(netheader.ProxyKey, activator.Name)
 
-	// 添加时间戳到请求头，精确到毫秒
-	timestamp := strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10)
+	// 添加时间戳到请求头
+	timestamp := strconv.FormatFloat(float64(time.Now().UnixNano())/float64(time.Millisecond), 'f', -1, 64)
 	r.Header.Set("X-Request-Timestamp", timestamp)
 
 	// 调度成功，将目标pod的ip和当前任务的rate加入到requestStatic中
 	rate, _ := strconv.Atoi(r.Header.Get("X-Rate"))
 	targetip := strings.Split(target, ":")[0]
 	shared.AddReqToRS(targetip, rate)
+	shared.AddJobToGlobalVar(rate)
 	// fmt.Println("请求调度成功", targetip, rate)
 	// shared.PrintRequestStatic()
 
@@ -215,7 +216,7 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 		r.Header.Set("X-Rate", rate)
 		// 设置“X-LbPolicy”为“unfixedWaitRandomChoice2Policy”，表示当前是正经从队头取出的元素，而不是抢占后不等待的任务（决定使用算法的不同）
 		r.Header.Set("X-LbPolicy", "unfixedWaitRandomChoice2Policy")
-		r.Header.Set("X-Arrive-Timestamp", strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond), 10))
+		r.Header.Set("X-Arrive-Timestamp", strconv.FormatFloat(float64(time.Now().UnixNano())/float64(time.Millisecond), 'f', -1, 64))
 		r.Header.Set("X-Last-Rate", "")
 		// 创建一个用于同步的通道
 		done := make(chan struct{})
@@ -224,9 +225,9 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 		// 等待请求处理完成
 		select {
 		case <-done:
-			fmt.Println("###rate为", rate, "的任务已经执行完成并返回到http.HandlerFunc")
+			// fmt.Println("###rate为", rate, "的任务已经执行完成并返回到http.HandlerFunc")
 		case <-time.After(120 * time.Second):
-			fmt.Println("###rate为", rate, "的任务整体超时，不管了直接关done通道")
+			// fmt.Println("###rate为", rate, "的任务整体超时，不管了直接关done通道")
 			// shared.ClearActivatorQueue()
 			close(done)
 		}

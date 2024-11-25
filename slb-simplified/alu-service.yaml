@@ -13,7 +13,7 @@ spec:
         autoscaling.knative.dev/target: "1"    # 设置每个 Pod 期望的并发数
     spec:
       containers:
-        - image: ericarthurblair/alu-bench@sha256:5b510e777c356a1a11ecbdae86b9a47f2ba3ffa5b9713e4d67311993b36c0acb
+        - image: ericarthurblair/alu-bench@sha256:7efabd5847c6fc1327ea11b576d0aa8ec0dd38eb61418e0c26619d04e90f8c1a
           imagePullPolicy: IfNotPresent
           resources:
             limits: # 最大资源
@@ -22,7 +22,7 @@ spec:
               cpu: "1"
           env:
             - name: NODE_OF_ACTIVATOR
-              value: "10"
+              value: "9"
           readinessProbe: null
           volumeMounts:
             - name: log-volume

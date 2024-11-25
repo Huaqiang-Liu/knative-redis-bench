@@ -46,8 +46,8 @@ def handle_request():
     if last_rate_str == "":
         last_rate_str = "0"
     
-    route_time = int(route_time_str)
-    arrive_time = int(arrive_time_str)
+    route_time = float(route_time_str)
+    arrive_time = float(arrive_time_str)
     
     start_time = time.time() * 1000
     alu(rate)

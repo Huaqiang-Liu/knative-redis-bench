@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type SchedulingUnit struct {
@@ -31,7 +32,7 @@ const MaxQueueize = 10000 // 定义队列的最大容量
 
 func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan struct{}) {
 	rate, _ := strconv.Atoi(r.Header.Get("X-Rate"))
-	fmt.Println("调用一次AddReq，rate为", rate)
+	// fmt.Println("调用一次AddReq，rate为", rate)
 	u := SchedulingUnit{Handler: h, Writer: w, Req: r, Done: done}
 	// u.Timer = time.NewTimer(time.Duration(MaxWaitingTime) * time.Millisecond)
 
@@ -41,22 +42,32 @@ func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan st
 
 	if Queue.Len() >= MaxQueueize {
 		// 队列已满，返回服务器繁忙错误
+		fmt.Println("队列已满")
 		http.Error(w, "服务器繁忙，请稍后再试。", http.StatusServiceUnavailable)
 		close(done)
 		return
 	}
 
-	// 检查队头元素（如果有），如果rate比当前任务的rate大，则直接执行u
-	// if Queue.Len() > 0 {
-	// 	frontRateStr := Queue.Front().Value.(SchedulingUnit).Req.Header.Get("X-Rate")
-	// 	frontRate, _ := strconv.Atoi(frontRateStr)
-	// 	if rate < frontRate {
-	// 		u.Req.Header.Set("X-Last-Rate", frontRateStr)
-	// 		go serveRequest(u)
-	// 		return
-	// 	}
-	// }
+	// 检查队头元素（如果有）。exp2：如果rate比当前任务的rate大，则直接执行u；
+	// exp3：如果队头任务预计执行时间-当前任务预计执行时间>当前任务到达时间-队头任务到达时间，则执行u
+	if Queue.Len() > 0 {
+		frontRateStr := Queue.Front().Value.(SchedulingUnit).Req.Header.Get("X-Rate")
+		frontRate, _ := strconv.Atoi(frontRateStr)
+		execTime := JoblenMap[rate]
+		frontExecTime := JoblenMap[frontRate]
+		arriveTime, _ := strconv.ParseFloat(r.Header.Get("X-Arrive-Timestamp"), 64)
+		frontArriveTime, _ := strconv.ParseFloat(Queue.Front().Value.(SchedulingUnit).Req.Header.Get("X-Arrive-Timestamp"), 64)
 
+		// if rate < frontRate {
+		if float64(frontExecTime)-float64(execTime) > arriveTime-frontArriveTime {
+			u.Req.Header.Set("X-Last-Rate", frontRateStr)
+			// fmt.Println("rate为", rate, "的任务抢占了rate为", frontRate, "的任务")
+			go serveRequest(u)
+			return
+		}
+	}
+
+	fmt.Println("rate为", rate, "的任务加入队列，当前队列长度为", Queue.Len())
 	Queue.PushBack(u)
 	QueueCond.Signal() // 让ManageQueue中该队列对应的goroutine解除阻塞
 }
@@ -75,7 +86,11 @@ func ManageQueue() {
 		Queue.Remove(e)
 		QueueMutex.Unlock()
 
+		// fmt.Println("从队列中serve rate为", u.Req.Header.Get("X-Rate"), "的请求")
 		go serveRequest(u)
+
+		// 睡1000/lambda ms
+		time.Sleep(time.Duration(1000/Lambda) * time.Millisecond)
 
 		// rate, _ := strconv.Atoi(u.Req.Header.Get("X-Rate"))
 
@@ -109,7 +124,7 @@ func ManageQueue() {
 }
 
 func serveRequest(u SchedulingUnit) {
-	fmt.Println("Serve一个请求")
+	// fmt.Println("Serve一个请求")
 	u.Handler.ServeHTTP(u.Writer, u.Req)
 	close(u.Done)
 }

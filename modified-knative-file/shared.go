@@ -35,6 +35,11 @@ var JoblenMap = map[int]int{
 	1:    4,
 }
 
+// 用于计算平均任务执行时间
+var TotalJobNum = 0
+var TotalExecTime = 0
+var GlobalVarMutex sync.RWMutex
+
 type PodInfo struct {
 	reqs    [20]int // rates[i]表示rate为job_len[i]的请求数
 	ratesum int
@@ -50,7 +55,8 @@ var requestStatic = &RequestStatic{
 	Data: make(map[string]PodInfo),
 }
 
-var MaxWaitingTime = 1000 / 50 // 1000/lambda
+var Lambda = 50                    // 每秒任务数的数学期望
+var MaxWaitingTime = 1000 / Lambda // 1000/lambda
 
 func PrintRequestStatic() {
 	requestStatic.RLock()
@@ -63,6 +69,19 @@ func PrintRequestStatic() {
 			}
 		}
 	}
+}
+
+func AddJobToGlobalVar(rate int) {
+	GlobalVarMutex.Lock()
+	defer GlobalVarMutex.Unlock()
+	TotalJobNum += 1
+	TotalExecTime += JoblenMap[rate]
+}
+
+func CalculateAvgExecTime() float64 {
+	GlobalVarMutex.RLock()
+	defer GlobalVarMutex.RUnlock()
+	return float64(TotalExecTime) / float64(TotalJobNum)
 }
 
 // 当一个任务调度成功时，更新requestStatic：将该任务的rate加入到对应pod的rates中（RS指的是Request Static）

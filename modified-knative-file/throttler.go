@@ -228,8 +228,8 @@ func (rt *revisionThrottler) acquireDest(ctx context.Context) (func(), *podTrack
 	// 	policy = unfixedWaitRandomChoice2Policy()
 	// }
 
-	// policy = unfixedWaitRandomChoice2Policy()
-	policy = simpleRandomChoice2Policy()
+	policy = unfixedWaitRandomChoice2Policy()
+	// policy = simpleRandomChoice2Policy()
 
 	return policy(ctx, rt.assignedTrackers)
 	// return rt.lbPolicy(ctx, rt.assignedTrackers)

@@ -20,12 +20,13 @@ package net
 
 import (
 	"context"
-	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"sync"
 	"time"
 
+	"knative.dev/serving/pkg/activator/handler"
 	"knative.dev/serving/pkg/shared"
 )
 
@@ -193,9 +194,17 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 		pick1, pick2 := targets[r1], targets[r2]
 		pick1ip, pick2ip := strings.Split(pick1.dest, ":")[0], strings.Split(pick2.dest, ":")[0]
 
-		fmt.Println("现在有两个pod可以选择，分别是：", pick1.dest, pick2.dest)
-		// 打开计时器，最多等待shared.MaxWaitingTime
-		timer := time.NewTimer(time.Duration(shared.MaxWaitingTime) * time.Millisecond)
+		// fmt.Println("现在有两个pod可以选择，分别是：", pick1.dest, pick2.dest)
+		// 打开计时器，最多等待ln(λD)/D，D为当前任务执行时间-平均任务执行时间，如果D<=1则不等待，直接发
+		D := float64(shared.JoblenMap[handler.GetRate(ctx)]) - shared.CalculateAvgExecTime()
+		var waitingTime float64
+		if float64(shared.Lambda)*D < 1000000 { // 就是把D和lambda转为秒之后，lambda*D<1
+			waitingTime = 0
+		} else {
+			waitingTime = math.Log(float64(shared.Lambda)*D) / D
+		}
+		timer := time.NewTimer(time.Duration(waitingTime) * time.Millisecond)
+		// timer := time.NewTimer(time.Duration(shared.MaxWaitingTime) * time.Millisecond)
 		for {
 			select {
 			case <-timer.C:

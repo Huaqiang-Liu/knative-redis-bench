@@ -223,7 +223,7 @@ func main() {
 			rate, _ := strconv.Atoi(strings.Split(string(body), " ")[0])
 			podip := r.Header.Get("X-PodIP")
 			shared.DelReqFromRS(podip, rate)
-			fmt.Println("将请求从RS中删除", podip, rate)
+			// fmt.Println("将请求从RS中删除", podip, rate)
 			w.WriteHeader(http.StatusOK)
 			// w.Write([]byte("Request stored"))
 		})
