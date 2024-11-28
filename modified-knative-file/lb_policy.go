@@ -144,7 +144,7 @@ func newRoundRobinPolicy() lbPolicy {
 }
 
 // 早期绑定的power of 2
-func simpleRandomChoice2Policy() lbPolicy {
+func simpleRandomChoice2Policy() lbPolicy { // 直接用它//////////
 	var (
 		mu sync.Mutex
 	)
@@ -198,10 +198,10 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 		// 打开计时器，最多等待ln(λD)/D，D为当前任务执行时间-平均任务执行时间，如果D<=1则不等待，直接发
 		D := float64(shared.JoblenMap[handler.GetRate(ctx)]) - shared.CalculateAvgExecTime()
 		var waitingTime float64
-		if float64(shared.Lambda)*D < 1000000 { // 就是把D和lambda转为秒之后，lambda*D<1
+		if float64(shared.Lambda)*D < 1000 { // 就是把D转为秒之后，lambda*D<1
 			waitingTime = 0
 		} else {
-			waitingTime = math.Log(float64(shared.Lambda)*D) / D
+			waitingTime = 1000000 * math.Log(float64(shared.Lambda)*D/1000) / D
 		}
 		timer := time.NewTimer(time.Duration(waitingTime) * time.Millisecond)
 		// timer := time.NewTimer(time.Duration(shared.MaxWaitingTime) * time.Millisecond)

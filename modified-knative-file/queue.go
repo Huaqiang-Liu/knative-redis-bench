@@ -3,6 +3,7 @@ package shared
 import (
 	"container/list"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"sync"
@@ -14,7 +15,7 @@ type SchedulingUnit struct {
 	Writer  http.ResponseWriter
 	Req     *http.Request
 	Done    chan struct{} // 用于通知请求执行完成的通道，执行完了HandlerFunc才能关闭，否则会丢失上下文
-	// Timer   *time.Timer   // 新增字段，用于计时
+	Timer   *time.Timer   // 新增字段，用于计时
 }
 
 // 用于存储请求的线程安全队列
@@ -34,92 +35,60 @@ func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan st
 	rate, _ := strconv.Atoi(r.Header.Get("X-Rate"))
 	// fmt.Println("调用一次AddReq，rate为", rate)
 	u := SchedulingUnit{Handler: h, Writer: w, Req: r, Done: done}
-	// u.Timer = time.NewTimer(time.Duration(MaxWaitingTime) * time.Millisecond)
 
 	QueueMutex.Lock()
 	// fmt.Println("rate为", rate, "的AddReq已经获取队列锁")
 	defer QueueMutex.Unlock()
+	len := Queue.Len()
+	if len > MaxQueueActualLen {
+		MaxQueueActualLen = len
+		fmt.Println("当前最大队列长度为", MaxQueueActualLen)
+	}
 
-	if Queue.Len() >= MaxQueueize {
+	if len >= MaxQueueize {
 		// 队列已满，返回服务器繁忙错误
 		fmt.Println("队列已满")
-		http.Error(w, "服务器繁忙，请稍后再试。", http.StatusServiceUnavailable)
+		// http.Error(w, "服务器繁忙，请稍后再试。", http.StatusServiceUnavailable)
 		close(done)
 		return
 	}
 
-	// 检查队头元素（如果有）。exp2：如果rate比当前任务的rate大，则直接执行u；
-	// exp3：如果队头任务预计执行时间-当前任务预计执行时间>当前任务到达时间-队头任务到达时间，则执行u
-	if Queue.Len() > 0 {
-		frontRateStr := Queue.Front().Value.(SchedulingUnit).Req.Header.Get("X-Rate")
-		frontRate, _ := strconv.Atoi(frontRateStr)
-		execTime := JoblenMap[rate]
-		frontExecTime := JoblenMap[frontRate]
-		arriveTime, _ := strconv.ParseFloat(r.Header.Get("X-Arrive-Timestamp"), 64)
-		frontArriveTime, _ := strconv.ParseFloat(Queue.Front().Value.(SchedulingUnit).Req.Header.Get("X-Arrive-Timestamp"), 64)
-
-		// if rate < frontRate {
-		if float64(frontExecTime)-float64(execTime) > arriveTime-frontArriveTime {
-			u.Req.Header.Set("X-Last-Rate", frontRateStr)
-			// fmt.Println("rate为", rate, "的任务抢占了rate为", frontRate, "的任务")
-			go serveRequest(u)
-			return
-		}
+	D := float64(JoblenMap[rate]) - CalculateAvgExecTime()
+	if float64(Lambda)*D < 1000 {
+		u.Req.Header.Set("X-Last-Rate", "1")
+		u.Timer = time.NewTimer(0)
+		go serveRequest(u)
+		return
 	}
 
-	fmt.Println("rate为", rate, "的任务加入队列，当前队列长度为", Queue.Len())
+	u.Timer = time.NewTimer(time.Duration(1000000*math.Log(float64(Lambda)*D/1000)/D) * time.Millisecond)
 	Queue.PushBack(u)
 	QueueCond.Signal() // 让ManageQueue中该队列对应的goroutine解除阻塞
 }
 
-// rateIndex大的对应长任务，先看队头任务有没有到期，如果没有再从小到大地看小rate的队头有没有任务，如果有就work stealing
+// 不停轮询，看到计时器到期的就发出去
 func ManageQueue() {
 	for {
 		QueueMutex.Lock()
 		for Queue.Len() == 0 {
-			// fmt.Println("已知rate为", rate, "的队列为空")
-			QueueCond.Wait() // 队列为空，阻塞等待
+			QueueCond.Wait()
 		}
-
-		e := Queue.Front()
-		u := e.Value.(SchedulingUnit)
-		Queue.Remove(e)
+		e := Queue.Back()
 		QueueMutex.Unlock()
 
-		// fmt.Println("从队列中serve rate为", u.Req.Header.Get("X-Rate"), "的请求")
-		go serveRequest(u)
-
-		// 睡1000/lambda ms
-		time.Sleep(time.Duration(1000/Lambda) * time.Millisecond)
-
-		// rate, _ := strconv.Atoi(u.Req.Header.Get("X-Rate"))
-
-		// Outer:
-		// 	for {
-		// 		select {
-		// 		case <-u.Timer.C:
-		// 			break Outer
-		// 		default:
-		// 			QueueMutex.Lock()
-		// 			if Queue.Len() == 0 {
-		// 				QueueMutex.Unlock()
-		// 				break
-		// 			}
-		// 			shorterE := Queue.Front()
-		// 			shorterU := shorterE.Value.(SchedulingUnit)
-		// 			frontRate, _ := strconv.Atoi(shorterU.Req.Header.Get("X-Rate"))
-		// 			if frontRate < rate {
-		// 				shorterU.Req.Header.Set("X-Last-Rate", strconv.Itoa(rate))
-		// 				go serveRequest(shorterU)
-		// 				Queue.Remove(shorterE)
-		// 			} else {
-		// 				QueueMutex.Unlock()
-		// 				break Outer
-		// 			}
-		// 			QueueMutex.Unlock()
-		// 		}
-		// 	}
-		// 	go serveRequest(u)
+		for e != nil {
+			QueueMutex.Lock()
+			u := e.Value.(SchedulingUnit)
+			prev := e.Prev()
+			select {
+			case <-u.Timer.C:
+				Queue.Remove(e)
+				go serveRequest(u)
+			default:
+			}
+			QueueMutex.Unlock()
+			e = prev
+		}
 	}
 }
 

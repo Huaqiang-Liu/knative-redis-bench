@@ -57,6 +57,7 @@ var requestStatic = &RequestStatic{
 
 var Lambda = 50                    // 每秒任务数的数学期望
 var MaxWaitingTime = 1000 / Lambda // 1000/lambda
+var MaxQueueActualLen = 0          // 更新出队列的最大长度
 
 func PrintRequestStatic() {
 	requestStatic.RLock()
@@ -81,6 +82,9 @@ func AddJobToGlobalVar(rate int) {
 func CalculateAvgExecTime() float64 {
 	GlobalVarMutex.RLock()
 	defer GlobalVarMutex.RUnlock()
+	if TotalJobNum == 0 {
+		return 0
+	}
 	return float64(TotalExecTime) / float64(TotalJobNum)
 }
 

@@ -193,7 +193,7 @@ func newRevisionThrottler(revID types.NamespacedName,
 
 	// 测试简单抢占策略
 	revBreaker = queue.NewBreaker(breakerParams)
-	lbp = unfixedWaitRandomChoice2Policy()
+	lbp = simpleRandomChoice2Policy()
 
 	return &revisionThrottler{
 		revID:                revID,
@@ -219,17 +219,8 @@ func (rt *revisionThrottler) acquireDest(ctx context.Context) (func(), *podTrack
 	}
 
 	var policy lbPolicy
-	// switch handler.GetLbPolicy(ctx) {
-	// case "simpleRandomChoice2Policy":
-	// 	policy = simpleRandomChoice2Policy()
-	// case "unfixedWaitRandomChoice2Policy":
-	// 	policy = unfixedWaitRandomChoice2Policy()
-	// default:
-	// 	policy = unfixedWaitRandomChoice2Policy()
-	// }
 
-	policy = unfixedWaitRandomChoice2Policy()
-	// policy = simpleRandomChoice2Policy()
+	policy = simpleRandomChoice2Policy()
 
 	return policy(ctx, rt.assignedTrackers)
 	// return rt.lbPolicy(ctx, rt.assignedTrackers)
