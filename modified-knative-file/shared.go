@@ -35,10 +35,38 @@ var JoblenMap = map[int]int{
 	1:    4,
 }
 
+// var Joblen = []int{8000, 7000, 6000, 5000, 300, 250, 220, 200, 180, 150, 100, 50, 40, 30, 25, 15, 5, 3, 2, 1}
+// var JoblenMap = map[int]int{
+// 	8000: 32000,
+// 	7000: 28000,
+// 	6000: 24000,
+// 	300:  1200,
+// 	260:  1040,
+// 	250:  1000,
+// 	220:  880,
+// 	200:  800,
+// 	180:  720,
+// 	150:  600,
+// 	100:  400,
+// 	50:   200,
+// 	40:   160,
+// 	30:   120,
+// 	25:   100,
+// 	15:   60,
+// 	5:    20,
+// 	3:    12,
+// 	2:    8,
+// 	1:    4,
+// }
+
 // 用于计算平均任务执行时间
 var TotalJobNum = 0
 var TotalExecTime = 0
 var GlobalVarMutex sync.RWMutex
+
+// 用于计算超时任务数量
+var TimeoutJobNum = 0
+var TimeoutJobNumMutex sync.RWMutex
 
 type PodInfo struct {
 	reqs    [20]int // rates[i]表示rate为job_len[i]的请求数
@@ -55,9 +83,9 @@ var requestStatic = &RequestStatic{
 	Data: make(map[string]PodInfo),
 }
 
-var Lambda = 50                    // 每秒任务数的数学期望
-var MaxWaitingTime = 1000 / Lambda // 1000/lambda
-var MaxQueueActualLen = 0          // 更新出队列的最大长度
+var Lambda = 30                             // 每秒任务数的数学期望
+var MaxWaitingTime = 1000 / float64(Lambda) // 1000/lambda
+var MaxQueueActualLen = 0                   // 更新出队列的最大长度
 
 func PrintRequestStatic() {
 	requestStatic.RLock()
@@ -147,7 +175,7 @@ func DelReqFromRS(podip string, rate int) {
 func ChoosePodByRate(podip1 string, podip2 string) string {
 	podInfo1 := requestStatic.Data[podip1]
 	podInfo2 := requestStatic.Data[podip2]
-	fmt.Println("两个pod上的总rate数分别为：", podInfo1.ratesum, podInfo2.ratesum)
+	// fmt.Println("两个pod上的总rate数分别为：", podInfo1.ratesum, podInfo2.ratesum)
 	if podInfo1.ratesum > podInfo2.ratesum {
 		return podip2
 	} else {

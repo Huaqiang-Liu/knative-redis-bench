@@ -19,6 +19,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
@@ -227,8 +228,7 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 		case <-done:
 			// fmt.Println("###rate为", rate, "的任务已经执行完成并返回到http.HandlerFunc")
 		case <-time.After(120 * time.Second):
-			// fmt.Println("###rate为", rate, "的任务整体超时，不管了直接关done通道")
-			// shared.ClearActivatorQueue()
+			fmt.Println("###rate为", rate, "的任务整体超时，不管了直接关done通道")
 			close(done)
 		}
 	})

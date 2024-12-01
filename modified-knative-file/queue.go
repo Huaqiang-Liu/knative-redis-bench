@@ -30,14 +30,75 @@ func init() {
 }
 
 const MaxQueueize = 10000 // 定义队列的最大容量
+var varx = 3380 + 1000/float64(Lambda)
+var vary = 0.5
 
-func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan struct{}) {
-	rate, _ := strconv.Atoi(r.Header.Get("X-Rate"))
-	// fmt.Println("调用一次AddReq，rate为", rate)
+func AddReq0(h http.Handler, w http.ResponseWriter, r *http.Request, done chan struct{}) { // Baseline：直接加入队列
 	u := SchedulingUnit{Handler: h, Writer: w, Req: r, Done: done}
 
 	QueueMutex.Lock()
-	// fmt.Println("rate为", rate, "的AddReq已经获取队列锁")
+	defer QueueMutex.Unlock()
+	len := Queue.Len()
+
+	if len >= MaxQueueize {
+		fmt.Println("队列已满")
+		close(done)
+		return
+	}
+
+	Queue.PushBack(u)
+	QueueCond.Signal()
+}
+func ManageQueue0() { // Baseline：不断取队头元素然后serve
+	for {
+		QueueMutex.Lock()
+		for Queue.Len() == 0 {
+			QueueCond.Wait()
+		}
+		e := Queue.Front()
+		u := e.Value.(SchedulingUnit)
+		Queue.Remove(e)
+		QueueMutex.Unlock()
+
+		go serveRequest(u)
+	}
+}
+
+func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan struct{}) { // 实验2：简单抢占
+	rate, _ := strconv.Atoi(r.Header.Get("X-Rate"))
+	u := SchedulingUnit{Handler: h, Writer: w, Req: r, Done: done}
+	u.Timer = time.NewTimer(time.Duration(MaxWaitingTime) * time.Millisecond)
+
+	QueueMutex.Lock()
+	defer QueueMutex.Unlock()
+
+	if Queue.Len() >= MaxQueueize {
+		fmt.Println("队列已满")
+		close(done)
+		return
+	}
+
+	// 检查队头元素（如果有），如果rate比当前任务的rate大，则直接执行u
+	if Queue.Len() > 0 {
+		frontRateStr := Queue.Front().Value.(SchedulingUnit).Req.Header.Get("X-Rate")
+		frontRate, _ := strconv.Atoi(frontRateStr)
+		if rate < frontRate {
+			u.Req.Header.Set("X-Last-Rate", "1")
+			u.Timer = time.NewTimer(0)
+			go serveRequest(u)
+			return
+		}
+	}
+
+	Queue.PushBack(u)
+	QueueCond.Signal() // 让ManageQueue中该队列对应的goroutine解除阻塞
+}
+
+func AddReq3(h http.Handler, w http.ResponseWriter, r *http.Request, done chan struct{}) { // 实验3
+	rate, _ := strconv.Atoi(r.Header.Get("X-Rate"))
+	u := SchedulingUnit{Handler: h, Writer: w, Req: r, Done: done}
+
+	QueueMutex.Lock()
 	defer QueueMutex.Unlock()
 	len := Queue.Len()
 	if len > MaxQueueActualLen {
@@ -46,14 +107,12 @@ func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan st
 	}
 
 	if len >= MaxQueueize {
-		// 队列已满，返回服务器繁忙错误
 		fmt.Println("队列已满")
-		// http.Error(w, "服务器繁忙，请稍后再试。", http.StatusServiceUnavailable)
 		close(done)
 		return
 	}
 
-	D := float64(JoblenMap[rate]) - CalculateAvgExecTime()
+	D := float64(JoblenMap[rate]) - CalculateAvgExecTime() + varx
 	if float64(Lambda)*D < 1000 {
 		u.Req.Header.Set("X-Last-Rate", "1")
 		u.Timer = time.NewTimer(0)
@@ -61,13 +120,13 @@ func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan st
 		return
 	}
 
-	u.Timer = time.NewTimer(time.Duration(1000000*math.Log(float64(Lambda)*D/1000)/D) * time.Millisecond)
+	u.Timer = time.NewTimer(time.Duration(vary*1000000*math.Log(float64(Lambda)*D/1000)/D) * time.Millisecond)
 	Queue.PushBack(u)
 	QueueCond.Signal() // 让ManageQueue中该队列对应的goroutine解除阻塞
 }
 
 // 不停轮询，看到计时器到期的就发出去
-func ManageQueue() {
+func ManageQueue() { // 实验2，3
 	for {
 		QueueMutex.Lock()
 		for Queue.Len() == 0 {
@@ -93,7 +152,17 @@ func ManageQueue() {
 }
 
 func serveRequest(u SchedulingUnit) {
-	// fmt.Println("Serve一个请求")
+	timer := time.NewTimer(time.Duration(100) * time.Second)
 	u.Handler.ServeHTTP(u.Writer, u.Req)
-	close(u.Done)
+	select {
+	case <-timer.C:
+		TimeoutJobNumMutex.Lock()
+		TimeoutJobNum += 1
+		fmt.Println("超时任务数量为", TimeoutJobNum)
+		TimeoutJobNumMutex.Unlock()
+		// 让HandlerFunc超时处理程序来关闭通道，避免重复关闭
+	default:
+		close(u.Done)
+
+	}
 }

@@ -22,7 +22,7 @@ spec:
               cpu: "1"
           env:
             - name: NODE_OF_ACTIVATOR
-              value: "9"
+              value: "5"
           readinessProbe: null
           volumeMounts:
             - name: log-volume
