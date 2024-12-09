@@ -220,9 +220,17 @@ func main() {
 			defer r.Body.Close()
 
 			// string(body)是一行用空格分开的若干个数，第一个数是rate（int32）
-			rate, _ := strconv.Atoi(strings.Split(string(body), " ")[0])
+			bodyNumList := strings.Split(string(body), " ")
+			rate, _ := strconv.Atoi(bodyNumList[0])
 			podip := r.Header.Get("X-PodIP")
 			shared.DelReqFromRS(podip, rate)
+
+			// 下面是实验4将任务执行时间添加到全局变量中的代码，实验3中因为知道rate，所以在handler.go的proxyRequest函数做了这个
+			// lat, _ := strconv.ParseFloat(bodyNumList[3], 64)
+			// resp, _ := strconv.ParseFloat(bodyNumList[1], 64)
+			// runningTime := lat - resp
+			// shared.AddJobToGlobalVar(runningTime)
+
 			// fmt.Println("将请求从RS中删除", podip, rate)
 			w.WriteHeader(http.StatusOK)
 			// w.Write([]byte("Request stored"))

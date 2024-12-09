@@ -131,6 +131,10 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// 修改队列实现方式之后，方便起见将last_rate设为本任务抢占的任务的rate
 
+		// 延迟绑定中，关闭上下文中存放的schedulingDone通道
+		// schedulingDone, _ := r.Context().Value(shared.SchedulingDoneKey).(chan struct{})
+		// close(schedulingDone)
+
 		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb)
 		proxySpan.End()
 
@@ -164,9 +168,8 @@ func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.Resp
 	rate, _ := strconv.Atoi(r.Header.Get("X-Rate"))
 	targetip := strings.Split(target, ":")[0]
 	shared.AddReqToRS(targetip, rate)
-	shared.AddJobToGlobalVar(rate)
-	// fmt.Println("请求调度成功", targetip, rate)
-	// shared.PrintRequestStatic()
+	// 下面这行是实验3时，已知rate的情况下用来添加任务执行时间的，至于实验4就得在main函数中获取返回的实际执行时间了
+	shared.AddJobToGlobalVar(float64(shared.JoblenMap[rate]))
 
 	// Set up the reverse proxy.
 	hostOverride := pkghttp.NoHostOverride

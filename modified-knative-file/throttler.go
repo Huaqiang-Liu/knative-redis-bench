@@ -218,9 +218,8 @@ func (rt *revisionThrottler) acquireDest(ctx context.Context) (func(), *podTrack
 		return noop, rt.clusterIPTracker
 	}
 
-	var policy lbPolicy
-
-	policy = simpleRandomChoice2Policy()
+	policy := simpleRandomChoice2Policy()
+	// policy := lateRandomChoice2Policy()
 
 	return policy(ctx, rt.assignedTrackers)
 	// return rt.lbPolicy(ctx, rt.assignedTrackers)

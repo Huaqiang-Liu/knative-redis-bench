@@ -61,7 +61,8 @@ var JoblenMap = map[int]int{
 
 // 用于计算平均任务执行时间
 var TotalJobNum = 0
-var TotalExecTime = 0
+var TotalExecTime = 0.0
+var MaxExecTime = 0.0
 var GlobalVarMutex sync.RWMutex
 
 // 用于计算超时任务数量
@@ -100,20 +101,23 @@ func PrintRequestStatic() {
 	}
 }
 
-func AddJobToGlobalVar(rate int) {
+func AddJobToGlobalVar(joblen float64) {
 	GlobalVarMutex.Lock()
 	defer GlobalVarMutex.Unlock()
 	TotalJobNum += 1
-	TotalExecTime += JoblenMap[rate]
+	TotalExecTime += joblen
+	if joblen > MaxExecTime {
+		MaxExecTime = joblen
+	}
 }
 
-func CalculateAvgExecTime() float64 {
+func CalculateAvgAndMaxExecTime() (float64, float64) {
 	GlobalVarMutex.RLock()
 	defer GlobalVarMutex.RUnlock()
 	if TotalJobNum == 0 {
-		return 0
+		return 0, 0
 	}
-	return float64(TotalExecTime) / float64(TotalJobNum)
+	return TotalExecTime / float64(TotalJobNum), MaxExecTime
 }
 
 // 当一个任务调度成功时，更新requestStatic：将该任务的rate加入到对应pod的rates中（RS指的是Request Static）
@@ -203,10 +207,10 @@ func ChooseIdlePod(podip1 string, podip2 string) string {
 	podInfo1 := requestStatic.Data[podip1]
 	podInfo2 := requestStatic.Data[podip2]
 	if podInfo1.ratesum == 0 {
-		fmt.Println("选择空闲pod1", podip1)
+		// fmt.Println("选择空闲pod1", podip1)
 		return podip1
 	} else if podInfo2.ratesum == 0 {
-		fmt.Println("选择空闲pod2", podip2)
+		// fmt.Println("选择空闲pod2", podip2)
 		return podip2
 	} else {
 		return ""

@@ -20,13 +20,10 @@ package net
 
 import (
 	"context"
-	"math"
 	"math/rand"
 	"strings"
 	"sync"
-	"time"
 
-	"knative.dev/serving/pkg/activator/handler"
 	"knative.dev/serving/pkg/shared"
 )
 
@@ -172,8 +169,8 @@ func simpleRandomChoice2Policy() lbPolicy { // 直接用它//////////
 	}
 }
 
-// 延迟绑定的power of 2
-func unfixedWaitRandomChoice2Policy() lbPolicy {
+// 延迟绑定的power of 2：随机选两个，看谁先空闲就发过去
+func lateRandomChoice2Policy() lbPolicy {
 	var (
 		mu sync.Mutex
 	)
@@ -182,46 +179,22 @@ func unfixedWaitRandomChoice2Policy() lbPolicy {
 		defer mu.Unlock()
 		l := len(targets)
 		if l == 1 {
-			// 只有一个pod，直接选择它，不管它是否空闲
 			pick := targets[0]
 			return noop, pick
 		}
-		// 随机选择两个pod
 		r1, r2 := rand.Intn(l), rand.Intn(l-1)
 		if r2 >= r1 {
 			r2++
 		}
 		pick1, pick2 := targets[r1], targets[r2]
-		pick1ip, pick2ip := strings.Split(pick1.dest, ":")[0], strings.Split(pick2.dest, ":")[0]
 
-		// fmt.Println("现在有两个pod可以选择，分别是：", pick1.dest, pick2.dest)
-		// 打开计时器，最多等待ln(λD)/D，D为当前任务执行时间-平均任务执行时间，如果D<=1则不等待，直接发
-		D := float64(shared.JoblenMap[handler.GetRate(ctx)]) - shared.CalculateAvgExecTime()
-		var waitingTime float64
-		if float64(shared.Lambda)*D < 1000 { // 就是把D转为秒之后，lambda*D<1
-			waitingTime = 0
-		} else {
-			waitingTime = 1000000 * math.Log(float64(shared.Lambda)*D/1000) / D
-		}
-		timer := time.NewTimer(time.Duration(waitingTime) * time.Millisecond)
-		// timer := time.NewTimer(time.Duration(shared.MaxWaitingTime) * time.Millisecond)
+		pick1ip, pick2ip := strings.Split(pick1.dest, ":")[0], strings.Split(pick2.dest, ":")[0]
 		for {
-			select {
-			case <-timer.C:
-				target := shared.ChoosePodByRate(pick1ip, pick2ip)
-				if pick1ip == target {
-					return noop, pick1
-				} else {
-					return noop, pick2
-				}
-			default:
-				// 看看是否有空闲pod
-				idle := shared.ChooseIdlePod(pick1ip, pick2ip)
-				if pick1ip == idle {
-					return noop, pick1
-				} else if pick2ip == idle {
-					return noop, pick2
-				}
+			cho := shared.ChooseIdlePod(pick1ip, pick2ip)
+			if cho == pick1ip {
+				return noop, pick1
+			} else if cho == pick2ip {
+				return noop, pick2
 			}
 		}
 	}
