@@ -32,7 +32,7 @@ def binarySearch(nums, target):
     
     return mid
 def getTime():
-    return int(round(time.time() * 1000))
+    return int(round(time.process_time() * 1000))
 
 def alu(times):
     startTime = getTime()

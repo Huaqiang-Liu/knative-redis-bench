@@ -31,6 +31,7 @@ void AllocMem(int allocMemSize){
     }
     free(placeholder);
     printf("Alloc %d bytes memory\n", memSize);
+    free(memory); // 本来没有这句，修改原因见工作记录10-29.13.2
 }
 
 

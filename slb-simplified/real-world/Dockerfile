@@ -6,11 +6,15 @@ RUN pip install numpy
 RUN pip install pyyaml
 
 # 复制应用程序代码
-COPY alu.py /app/alu.py
+COPY __main__.py /app/__main__.py
+COPY function /app/function
+COPY utils.py /app/utils.py
+COPY CDFs/execTimeCDF.csv /app/CDFs/execTimeCDF.csv
+COPY CDFs/memCDF.csv /app/CDFs/memCDF.csv
 
 # 设置工作目录
 WORKDIR /app
 
 EXPOSE 8080
 
-ENTRYPOINT ["python", "alu.py"]
+ENTRYPOINT ["python", "__main__.py"]

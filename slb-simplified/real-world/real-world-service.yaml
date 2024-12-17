@@ -1,0 +1,34 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: real-world
+  namespace: default
+spec:
+  template:
+    metadata:
+      annotations:
+        containerConcurrency: "1"  # 指定容器最大并发请求数，默认0表示不限制
+        autoscaling.knative.dev/minScale: "128"
+        autoscaling.knative.dev/maxScale: "128"
+        autoscaling.knative.dev/target: "1"    # 设置每个 Pod 期望的并发数
+    spec:
+      containers:
+        - image: ericarthurblair/real-world@sha256:b838642e931b822e8db5796e123819ed1f16c8b6152a2db7affe08cfca9763cc
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits: # 最大资源
+              cpu: "1"
+              memory: "2Gi"
+            requests: # 申请资源
+              cpu: "1"
+              memory: "2Gi"
+          env:
+            - name: NODE_OF_ACTIVATOR
+              value: ""
+          readinessProbe: null
+          volumeMounts:
+            - name: log-volume
+              mountPath: /var/log
+      volumes:
+        - name: log-volume
+          emptyDir: {}
