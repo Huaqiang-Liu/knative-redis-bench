@@ -175,7 +175,7 @@ func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan st
 	}
 
 	avgExecTime, maxExecTime := CalculateAvgAndMaxExecTime() // 因为改成了实际情况而非预测情况，这个变长，D变小，抢占变多。所以要增加varx来达到原来的效果
-	fmt.Println("平均和最大执行时间：", avgExecTime, ' ', maxExecTime)
+	fmt.Println("平均和最大执行时间：", avgExecTime, maxExecTime)
 	D := float64(JoblenMap[rate]) - avgExecTime + varx // 实验4一阶段，这样计算D
 	// 实验4二阶段，D改为二重积分，\int_{0}^{avgExecTime}y\int_{0}^{maxExecTime}f(x)f(y-x)dxdy，再加上varx
 	// TODO: f(x)是任务执行时间的概率密度函数，还不知道是什么，后面再说
@@ -218,7 +218,7 @@ func ManageQueue() { // 实验2，3，4(包括一阶段和二阶段)
 }
 
 func serveRequest(u SchedulingUnit) {
-	timer := time.NewTimer(time.Duration(100) * time.Second)
+	timer := time.NewTimer(time.Duration(300) * time.Second)
 	u.Handler.ServeHTTP(u.Writer, u.Req)
 	select {
 	case <-timer.C:

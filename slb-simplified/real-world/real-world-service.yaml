@@ -24,7 +24,7 @@ spec:
               memory: "2Gi"
           env:
             - name: NODE_OF_ACTIVATOR
-              value: ""
+              value: "9"
           readinessProbe: null
           volumeMounts:
             - name: log-volume
