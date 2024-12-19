@@ -15,5 +15,5 @@ class PoissonLoadTest(HttpUser):
             f.write(response.text)        
     
     def wait_time(self):
-        lambda_param = float(30)/float(128)  # 每秒请求数的期望值，128pod就是128*它=50
+        lambda_param = float(10)/float(128)  # 每秒请求数的期望值，128pod就是128*它=50
         return -math.log(1.0 - random.random()) / lambda_param

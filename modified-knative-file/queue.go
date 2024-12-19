@@ -70,7 +70,6 @@ func AddReq0(h http.Handler, w http.ResponseWriter, r *http.Request, done chan s
 	if len > MaxQueueActualLen {
 		MaxQueueActualLen = len
 	}
-	fmt.Println("当前队列长度和最大队列长度分别为", len, MaxQueueActualLen)
 	Queue.PushBack(u)
 	QueueCond.Signal()
 }
@@ -174,12 +173,16 @@ func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan st
 		return
 	}
 
-	avgExecTime, maxExecTime := CalculateAvgAndMaxExecTime() // 因为改成了实际情况而非预测情况，这个变长，D变小，抢占变多。所以要增加varx来达到原来的效果
-	fmt.Println("平均和最大执行时间：", avgExecTime, maxExecTime)
-	D := float64(JoblenMap[rate]) - avgExecTime + varx // 实验4一阶段，这样计算D
+	// 下面这两行是ALU服务对应的写法，real world不用这几个函数，而是直接根据任务所在组下标来选取执行时间的数学期望
+	// avgExecTime, maxExecTime := CalculateAvgAndMaxExecTime() // 因为改成了实际情况而非预测情况，这个变长，D变小，抢占变多。所以要增加varx来达到原来的效果
+	// fmt.Println("平均和最大执行时间：", avgExecTime, maxExecTime)
+
+	avgExecTime := JoblenMap[GetGroupIndex(rate)]
+	D := float64(rate) - avgExecTime*0.4
 	// 实验4二阶段，D改为二重积分，\int_{0}^{avgExecTime}y\int_{0}^{maxExecTime}f(x)f(y-x)dxdy，再加上varx
 	// TODO: f(x)是任务执行时间的概率密度函数，还不知道是什么，后面再说
 	if float64(Lambda)*D < 1000 {
+		fmt.Println("D=", D)
 		u.Req.Header.Set("X-Last-Rate", "1")
 		u.Timer = time.NewTimer(0)
 		go serveRequest(u)

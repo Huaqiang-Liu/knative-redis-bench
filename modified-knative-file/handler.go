@@ -160,8 +160,8 @@ func (a *activationHandler) proxyRequest(revID types.NamespacedName, w http.Resp
 	rate, _ := strconv.Atoi(r.Header.Get("X-Rate"))
 	targetip := strings.Split(target, ":")[0]
 	shared.AddReqToRS(targetip, rate)
-	// 下面这行是实验3时，已知rate的情况下用来添加任务执行时间的，至于实验4就得在main函数中获取返回的实际执行时间了
-	shared.AddJobToGlobalVar(float64(shared.JoblenMap[rate]))
+	// 下面这行是ALU的实验3时，已知rate的情况下用来添加任务执行时间的，至于实验4就得在main函数中获取返回的实际执行时间了
+	// shared.AddJobToGlobalVar(float64(shared.JoblenMap[rate]))
 
 	// Set up the reverse proxy.
 	hostOverride := pkghttp.NoHostOverride
@@ -213,9 +213,10 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 		// 如果是real-world，说明收到了一个sequence，需要顺序执行，每个action返回后还要摇一个等待时间。直到发完所有action，再return
 		if strings.Contains(revID.Name, "real-world") {
 			seqlen := shared.GetSeqLen()
-			fmt.Println("\n###当前请求的sequence长度为", seqlen)
+			// fmt.Println("\n###当前请求的sequence长度为", seqlen)
 
-			seqStartTime := time.Now() // 如果是sequence中的最后一个action，则用它作为X-Seq-Start-Time，否则用0
+			// 如果是sequence中的最后一个action，则用它作为X-Seq-Start-Time，否则用0
+			seqStartTime := strconv.FormatFloat(float64(time.Now().UnixNano())/float64(time.Millisecond), 'f', -1, 64)
 			seqAvgIAT := shared.GetRandAvgIAT()
 			seqCV := shared.GetRandCV()
 
@@ -227,7 +228,7 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 				if seq == seqlen-1 {
 					tmpInterval = 0
 				}
-				fmt.Println("第", seq, "个任务的rate为", tmpRate, "IAT为", tmpInterval)
+				// fmt.Println("#第", seq, "个任务的rate为", tmpRate, "IAT为", tmpInterval)
 
 				// 为每个任务创建新的请求对象和临时ResponseRecorder（因为ResponseWriter只能用在整个sequence上）
 				newReq := r.Clone(r.Context())
@@ -237,7 +238,7 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 				newReq.Header.Set("X-Arrive-Timestamp", strconv.FormatFloat(float64(time.Now().UnixNano())/float64(time.Millisecond), 'f', -1, 64))
 				newReq.Header.Set("X-Last-Rate", "")
 				if seq == seqlen-1 {
-					newReq.Header.Set("X-Seq-Start-Time", strconv.FormatFloat(float64(seqStartTime.UnixNano())/float64(time.Millisecond), 'f', -1, 64))
+					newReq.Header.Set("X-Seq-Start-Time", seqStartTime)
 				} else {
 					newReq.Header.Set("X-Seq-Start-Time", "0")
 				}

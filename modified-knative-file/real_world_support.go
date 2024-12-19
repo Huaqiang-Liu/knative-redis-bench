@@ -157,3 +157,13 @@ func GetRandExecTime() int {
 	}
 	return -1
 }
+
+// 根据执行时间返回其所属组下标
+func GetGroupIndex(execTime int) int {
+	for i := 0; i < 10; i++ {
+		if JoblenEdge[i] > execTime {
+			return i
+		}
+	}
+	return -1
+}

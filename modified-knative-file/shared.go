@@ -4,15 +4,15 @@
 package shared
 
 import (
-	"fmt"
 	"math/rand"
 	"strconv"
 	"sync"
 	"time"
 )
 
-var Joblen = []int{8000, 4000, 2000, 1000, 700, 500, 350, 250, 200, 150, 100, 50, 40, 30, 25, 15, 5, 3, 2, 1}
-var JoblenMap = map[int]int{
+// 对于ALU模拟服务
+var JoblenALU = []int{8000, 4000, 2000, 1000, 700, 500, 350, 250, 200, 150, 100, 50, 40, 30, 25, 15, 5, 3, 2, 1}
+var JoblenMapALU = map[int]int{
 	8000: 32000,
 	4000: 16000,
 	2000: 8000,
@@ -35,42 +35,19 @@ var JoblenMap = map[int]int{
 	1:    4,
 }
 
-// var Joblen = []int{8000, 7000, 6000, 5000, 300, 250, 220, 200, 180, 150, 100, 50, 40, 30, 25, 15, 5, 3, 2, 1}
-// var JoblenMap = map[int]int{
-// 	8000: 32000,
-// 	7000: 28000,
-// 	6000: 24000,
-// 	300:  1200,
-// 	260:  1040,
-// 	250:  1000,
-// 	220:  880,
-// 	200:  800,
-// 	180:  720,
-// 	150:  600,
-// 	100:  400,
-// 	50:   200,
-// 	40:   160,
-// 	30:   120,
-// 	25:   100,
-// 	15:   60,
-// 	5:    20,
-// 	3:    12,
-// 	2:    8,
-// 	1:    4,
-// }
+// 对于ServerlessBench种使用默认Azure数据集的真实场景模拟服务
+var JoblenEdge = []int{20, 80, 180, 365, 670, 1155, 2125, 4835, 16555, 1571585} // 每一组的最长任务
+var Joblen = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}                                // 其实是任务长度的分组，下面对应的是每组的预计任务执行时间的数学期望
+var JoblenMap = map[int]float64{0: 9.009700000000002, 1: 48.189249999999994, 2: 126.42465000000001, 3: 258.3718, 4: 506.4466499999997, 5: 898.9176499999991, 6: 1565.905400000001, 7: 3235.254600000007, 8: 8975.372949999984, 9: 83970.61725000001}
 
-// 用于计算平均任务执行时间
+// 用于计算平均任务执行时间。TODO: 后面要改成对每个长短组分别统计
 var TotalJobNum = 0
 var TotalExecTime = 0.0
 var MaxExecTime = 0.0
 var GlobalVarMutex sync.RWMutex
 
-// 用于计算超时任务数量
-var TimeoutJobNum = 0
-var TimeoutJobNumMutex sync.RWMutex
-
 type PodInfo struct {
-	reqs    [20]int // rates[i]表示rate为job_len[i]的请求数
+	reqs    [10]int // pod上每个长短组的任务的数量
 	ratesum int
 	jobnum  int
 }
@@ -84,22 +61,9 @@ var requestStatic = &RequestStatic{
 	Data: make(map[string]PodInfo),
 }
 
-var Lambda = 30                             // 每秒任务数的数学期望
+var Lambda = 10                             // 每秒任务数的数学期望
 var MaxWaitingTime = 1000 / float64(Lambda) // 1000/lambda
 var MaxQueueActualLen = 0                   // 更新出队列的最大长度
-
-func PrintRequestStatic() {
-	requestStatic.RLock()
-	defer requestStatic.RUnlock()
-	fmt.Println("当前哪些pod上有哪些任务正在执行：")
-	for k, v := range requestStatic.Data {
-		for i, req := range v.reqs {
-			if req > 0 {
-				fmt.Println(k, "rate:", Joblen[i], "reqs:", req)
-			}
-		}
-	}
-}
 
 func AddJobToGlobalVar(joblen float64) {
 	GlobalVarMutex.Lock()
@@ -126,19 +90,13 @@ func AddReqToRS(podip string, rate int) {
 	defer requestStatic.Unlock()
 	if _, ok := requestStatic.Data[podip]; !ok {
 		requestStatic.Data[podip] = PodInfo{
-			reqs:    [20]int{}, // 数组的元素默认值就是0
+			reqs:    [10]int{}, // 数组的元素默认值就是0
 			ratesum: 0,
 			jobnum:  0,
 		}
 	}
 	// rate的值是Joblen中的某个值，取index为这个值对应的下标
-	index := -1
-	for i, v := range Joblen {
-		if v == rate {
-			index = i
-			break
-		}
-	}
+	index := GetGroupIndex(rate)
 	if index == -1 {
 		return
 	}
@@ -156,13 +114,7 @@ func DelReqFromRS(podip string, rate int) {
 	if _, ok := requestStatic.Data[podip]; !ok {
 		return // 按理说这不可能发生——难道能虚空执行一个任务吗？
 	}
-	index := -1
-	for i, v := range Joblen {
-		if v == rate {
-			index = i
-			break
-		}
-	}
+	index := GetGroupIndex(rate)
 	if index == -1 {
 		return
 	}
