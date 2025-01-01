@@ -30,27 +30,16 @@ func init() {
 	QueueCond.L = &QueueMutex
 }
 
-const MaxQueueize = 10000 // 定义队列的最大容量
+const MaxQueueize = 40000 // 定义队列的最大容量
 
 // 延迟绑定需要在上下文中放一个通道，以便调度完成后关闭之，再取下一个任务。这样队列长度会累积得很多，可以说明控制节点内存瓶颈问题
 type ContextKey string
 
 const SchedulingDoneKey ContextKey = "schedulingDone"
 
-// 增加varx，就只有更短的任务能直接发送，所以减少抢占率。也增大了D，减少了每个任务等待的时间
-// 增加vary就是让每个任务等待时间变长，应该是能增大抢占率的
-var varmapForExp3 = map[int]float64{
-	30: 3400 + 1000/float64(30),
-	40: 3400 + 1000/float64(40),
-	50: 3400 + 1000/float64(50),
-}
-var varmapForExp4 = map[int]float64{
-	30: 4250 + 1000/30,
-	40: 4270 + 1000/40,
-	50: 4380 + 1000/50,
-}
-var varx = varmapForExp3[Lambda]
-var vary = 0.5
+// var vary = 40.0 // Azure
+var vary = 200.0 // zipf
+// var vary = 160.0 // powerlaw
 
 func AddReq0(h http.Handler, w http.ResponseWriter, r *http.Request, done chan struct{}) { // 早期绑定和延迟绑定：直接加入队列
 	schedulingDone := make(chan struct{})
@@ -177,19 +166,21 @@ func AddReq(h http.Handler, w http.ResponseWriter, r *http.Request, done chan st
 	// avgExecTime, maxExecTime := CalculateAvgAndMaxExecTime() // 因为改成了实际情况而非预测情况，这个变长，D变小，抢占变多。所以要增加varx来达到原来的效果
 	// fmt.Println("平均和最大执行时间：", avgExecTime, maxExecTime)
 
-	avgExecTime := JoblenMap[GetGroupIndex(rate)]
-	D := float64(rate) - avgExecTime*0.4
-	// 实验4二阶段，D改为二重积分，\int_{0}^{avgExecTime}y\int_{0}^{maxExecTime}f(x)f(y-x)dxdy，再加上varx
-	// TODO: f(x)是任务执行时间的概率密度函数，还不知道是什么，后面再说
-	if float64(Lambda)*D < 1000 {
-		fmt.Println("D=", D)
+	groupIndex := GetGroupIndex(rate)
+	D := float64(rate) - float64(JoblenEdge[1]) + 750 // 100Azure, 750zipf, ??powerlaw
+
+	// if float64(Lambda)*D < 1000 { // rate/avgExecTime < 0.7
+	if groupIndex <= 1 || float64(Lambda)*D < 1000 {
+		// preemptJobNum++
+		// fmt.Println("D=", D)
 		u.Req.Header.Set("X-Last-Rate", "1")
 		u.Timer = time.NewTimer(0)
 		go serveRequest(u)
 		return
 	}
-
-	u.Timer = time.NewTimer(time.Duration(vary*1000000*math.Log(float64(Lambda)*D/1000)/D) * time.Millisecond)
+	waitingTime := min(vary*math.Log(float64(Lambda)*D/1000)/D*JoblenMap[groupIndex], 4000)
+	fmt.Println("等待时间为", waitingTime)
+	u.Timer = time.NewTimer(time.Duration(waitingTime) * time.Millisecond)
 	Queue.PushBack(u)
 	QueueCond.Signal() // 让ManageQueue中该队列对应的goroutine解除阻塞
 }

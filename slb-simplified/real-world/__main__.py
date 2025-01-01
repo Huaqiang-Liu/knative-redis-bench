@@ -73,7 +73,7 @@ def main():
     if seq_start_time != 0:
         seq_end_time = time.time() * 1000
         seq_lat = seq_end_time - seq_start_time
-    ret = f'{seq_lat} {response_time} {memSize} {latency} {last_rate_str}\n'
+    ret = f'{seq_lat} {response_time} {rate_str} {latency} {last_rate_str}\n'
     
     node_of_activator = os.getenv('NODE_OF_ACTIVATOR')
     activator_url = f'http://172.18.0.{node_of_activator}:30001/store'

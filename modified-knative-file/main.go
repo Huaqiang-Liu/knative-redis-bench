@@ -219,9 +219,8 @@ func main() {
 			}
 			defer r.Body.Close()
 
-			// string(body)是一行用空格分开的若干个数，第一个数是rate（int32）
 			bodyNumList := strings.Split(string(body), " ")
-			rate, _ := strconv.Atoi(bodyNumList[0])
+			rate, _ := strconv.Atoi(bodyNumList[2]) // 理论的执行时间
 			podip := r.Header.Get("X-PodIP")
 			shared.DelReqFromRS(podip, rate)
 

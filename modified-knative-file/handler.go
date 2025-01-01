@@ -124,8 +124,8 @@ func (a *activationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// 修改队列实现方式之后，方便起见将last_rate设为本任务抢占的任务的rate
 
 		// 延迟绑定中，关闭上下文中存放的schedulingDone通道
-		// schedulingDone, _ := r.Context().Value(shared.SchedulingDoneKey).(chan struct{})
-		// close(schedulingDone)
+		schedulingDone, _ := r.Context().Value(shared.SchedulingDoneKey).(chan struct{})
+		close(schedulingDone)
 
 		a.proxyRequest(revID, w, r.WithContext(proxyCtx), dest, tracingEnabled, a.usePassthroughLb)
 		proxySpan.End()
@@ -223,7 +223,8 @@ func WrapActivatorHandlerWithFullDuplex(h http.Handler, logger *zap.SugaredLogge
 			var results []string
 
 			for seq := 0; seq < seqlen; seq++ {
-				tmpRate := shared.GetRandExecTime()
+				tmpRate := shared.GetRandZipf() // shared.GetRandExecTime() / 10
+
 				tmpInterval := shared.GetRandIAT(seqAvgIAT, seqCV)
 				if seq == seqlen-1 {
 					tmpInterval = 0

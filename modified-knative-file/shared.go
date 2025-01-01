@@ -35,10 +35,19 @@ var JoblenMapALU = map[int]int{
 	1:    4,
 }
 
-// 对于ServerlessBench种使用默认Azure数据集的真实场景模拟服务
-var JoblenEdge = []int{20, 80, 180, 365, 670, 1155, 2125, 4835, 16555, 1571585} // 每一组的最长任务
+// 对于ServerlessBench的真实场景模拟服务
+// var JoblenEdge = []int{20, 80, 180, 365, 670, 1155, 2125, 4835, 16555, 1571585} // 每一组的最长任务
 var Joblen = []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}                                // 其实是任务长度的分组，下面对应的是每组的预计任务执行时间的数学期望
-var JoblenMap = map[int]float64{0: 9.009700000000002, 1: 48.189249999999994, 2: 126.42465000000001, 3: 258.3718, 4: 506.4466499999997, 5: 898.9176499999991, 6: 1565.905400000001, 7: 3235.254600000007, 8: 8975.372949999984, 9: 83970.61725000001}
+// 默认的Azure数据集中任务时长的分组
+// var JoblenMap = map[int]float64{0: 0.90097, 1: 4.818925, 2: 12.642465, 3: 25.83718, 4: 50.644665, 5: 89.891765, 6: 156.59054, 7: 323.52546, 8: 897.537295, 9: 8397.061725}
+// var JoblenEdge = []int{2,8,18,36,67,115,212,483,1655,157158}
+// 服从zipf分布的任务时长
+// var JoblenMap = map[int]float64{0: 1.00, 1: 2.13, 2: 5.38, 3: 14.06, 4: 38.84, 5: 113.49, 6: 351.06, 7: 1168.26, 8: 4155.13, 9: 16069.31}
+// var JoblenEdge = []int{2, 4, 8, 22, 63, 187, 596, 2040, 7480, 30000}
+// 服从power law分布的任务时长
+var JoblenMap = map[int]float64{0: 1.64, 1: 6.76, 2: 23.21, 3: 71.57, 4: 206.46, 5: 566.52, 6: 1478.56, 7: 3687.27, 8: 8842.61, 9: 20503.84}
+var JoblenEdge = []int{3, 12, 39, 117, 330, 890, 2272, 5569, 13150, 30000}
+
 
 // 用于计算平均任务执行时间。TODO: 后面要改成对每个长短组分别统计
 var TotalJobNum = 0
@@ -48,7 +57,7 @@ var GlobalVarMutex sync.RWMutex
 
 type PodInfo struct {
 	reqs    [10]int // pod上每个长短组的任务的数量
-	ratesum int
+	ratesum int64
 	jobnum  int
 }
 
@@ -97,17 +106,19 @@ func AddReqToRS(podip string, rate int) {
 	}
 	// rate的值是Joblen中的某个值，取index为这个值对应的下标
 	index := GetGroupIndex(rate)
+	// groupAvgExecTime := JoblenMap[index]
 	if index == -1 {
 		return
 	}
 	podInfo := requestStatic.Data[podip]
 	podInfo.reqs[index]++
-	podInfo.ratesum += rate
+	// fmt.Println("添加", groupAvgExecTime)
+	podInfo.ratesum += int64(rate)
 	podInfo.jobnum++
 	requestStatic.Data[podip] = podInfo
 }
 
-// 当一个任务执行完返回报文到activator时，更新requestStatic：减一次该pod上这个rate相应的请求数，以及ratesum
+// 当一个任务执行完返回报文到activator时，更新requestStatic：减一次该pod上这个相应的请求数，以及ratesum
 func DelReqFromRS(podip string, rate int) {
 	requestStatic.Lock()
 	defer requestStatic.Unlock()
@@ -115,13 +126,15 @@ func DelReqFromRS(podip string, rate int) {
 		return // 按理说这不可能发生——难道能虚空执行一个任务吗？
 	}
 	index := GetGroupIndex(rate)
+	// groupAvgExecTime := JoblenMap[index]
 	if index == -1 {
 		return
 	}
 	podInfo := requestStatic.Data[podip]
 	if podInfo.reqs[index] > 0 {
 		podInfo.reqs[index]--
-		podInfo.ratesum -= rate
+		// fmt.Println("删除", groupAvgExecTime)
+		podInfo.ratesum -= int64(rate)
 		podInfo.jobnum--
 	}
 	requestStatic.Data[podip] = podInfo

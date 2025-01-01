@@ -2,9 +2,11 @@ package shared
 
 import (
 	"encoding/csv"
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
+	"time"
 )
 
 // 全局变量，免得老读文件
@@ -156,6 +158,28 @@ func GetRandExecTime() int {
 		}
 	}
 	return -1
+}
+
+// 符合zipf分布的执行时间
+func GetRandZipf() int {
+	s := 1.05  // 陡峭程度（s > 1）
+	v := 1.0  // 偏移（通常为 1）
+	n := 30000 // 最大任务时长
+
+	zipf := rand.NewZipf(rand.New(rand.NewSource(time.Now().UnixNano())), s, v, uint64(n))
+	return int(zipf.Uint64()) + 1
+}
+
+// 符合power law分布的执行时间
+func GetRandPowerLaw() int {
+	alpha := 1.05  // 幂律分布的指数参数（alpha > 1）
+	min := 1.0    // 最小任务时长
+	max := 30000.0 // 最大任务时长
+
+	// 使用反CDF法生成幂律分布随机数
+	u := rand.Float64()
+	value := min * math.Pow(1+(u*(math.Pow(max/min, alpha-1)-1)), 1/(alpha-1))
+	return int(value)
 }
 
 // 根据执行时间返回其所属组下标
